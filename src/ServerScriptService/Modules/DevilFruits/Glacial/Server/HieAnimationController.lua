@@ -1,5 +1,4 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local AnimationLoadDiagnostics = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("AnimationLoadDiagnostics"))
 local DiagnosticLogLimiter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
@@ -8,7 +7,7 @@ local AnimationResolver = require(ReplicatedStorage:WaitForChild("Modules"):Wait
 
 local HieAnimationController = {}
 
-local DEBUG_INFO = RunService:IsStudio()
+local HIE_ANIMATION_DEBUG_ATTRIBUTES = { "DebugHie", "DebugHieAnimation" }
 local DEFAULT_FADE_TIME = 0.08
 local DEFAULT_STOP_FADE_TIME = 0.1
 local INFO_COOLDOWN = 0.35
@@ -17,8 +16,22 @@ local WARN_COOLDOWN = 3
 local activeIceBoostStates = setmetatable({}, { __mode = "k" })
 local SOURCE_LABEL = "ServerScriptService.Modules.DevilFruits.HieAnimationController"
 
+local function hasDebugAttribute(attributeNames)
+	for _, attributeName in ipairs(attributeNames) do
+		if ReplicatedStorage:GetAttribute(attributeName) == true or game:GetAttribute(attributeName) == true then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function isHieAnimationDebugEnabled()
+	return hasDebugAttribute(HIE_ANIMATION_DEBUG_ATTRIBUTES)
+end
+
 local function logInfo(message, ...)
-	if not DEBUG_INFO then
+	if not isHieAnimationDebugEnabled() then
 		return
 	end
 
@@ -38,7 +51,7 @@ local function logWarn(message, ...)
 end
 
 local function logAnimPipeline(level, message, ...)
-	if not DEBUG_INFO and level ~= "WARN" then
+	if not isHieAnimationDebugEnabled() and level ~= "WARN" then
 		return
 	end
 

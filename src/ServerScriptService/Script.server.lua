@@ -1,6 +1,7 @@
 local TweenService    = game:GetService("TweenService")
 local HttpService     = game:GetService("HttpService")
 local Players         = game:GetService("Players")
+local RunService      = game:GetService("RunService")
 
 local popup = require(game.ReplicatedStorage.Modules.PopUpModule)
 
@@ -29,6 +30,16 @@ end
 local firstRun = true
 local lastLikeFetchWarningAt = 0
 local LIKE_FETCH_WARNING_COOLDOWN_SECONDS = 120
+local LIKE_FETCH_FAILURE_BACKOFF_SECONDS = 120
+local LIKE_FETCH_STUDIO_IDLE_SECONDS = 300
+
+local function isLikeFetchEnabled()
+	if not RunService:IsStudio() then
+		return true
+	end
+
+	return game:GetAttribute("LikeFetchDebug") == true or game:GetAttribute("LikeFetchInStudio") == true
+end
 
 local surfaceGuis = {}
 for _, model in ipairs(workspace:WaitForChild("LikeGoals"):GetChildren()) do
@@ -88,7 +99,7 @@ local function pollLikes()
 			lastLikeFetchWarningAt = now
 			warn("Like-fetch failed:", res)
 		end
-		return
+		return LIKE_FETCH_FAILURE_BACKOFF_SECONDS
 	end
 
 	local data    = HttpService:JSONDecode(res.Body)
@@ -99,7 +110,7 @@ local function pollLikes()
 		currentGoal = (reached + 1) * initialGoal
 		updateAllGuis(upVotes, currentGoal)
 		firstRun = false
-		return
+		return pollDelay
 	end
 
 	if upVotes >= currentGoal then
@@ -109,9 +120,15 @@ local function pollLikes()
 	end
 
 	updateAllGuis(upVotes, currentGoal)
+	return pollDelay
 end
 
 while true do
-	pollLikes()
-	task.wait(pollDelay)
+	local delaySeconds = pollDelay
+	if isLikeFetchEnabled() then
+		delaySeconds = pollLikes() or pollDelay
+	else
+		delaySeconds = LIKE_FETCH_STUDIO_IDLE_SECONDS
+	end
+	task.wait(delaySeconds)
 end

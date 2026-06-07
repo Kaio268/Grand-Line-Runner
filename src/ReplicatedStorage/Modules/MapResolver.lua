@@ -32,7 +32,6 @@ local PATH_LABELS = {
 	VipRefuge = "active map Vip Refuge",
 	VipBarriers = "active map Vip Refuge.VIPBarriers",
 	VipDoorParts = "active map VIPDoorParts",
-	GearShopNpc = "gear shop NPC",
 	SellNpc = "sell NPC",
 	AFKRayleighNpc = "AFK Rayleigh NPC",
 	GroupReward = "active map GroupReward",
@@ -367,7 +366,6 @@ local function collectRefs(options)
 		then getChildByNames(vipRefuge, { "VIPDoorParts" }, nil, true)
 		else findDirectOrRecursiveInRoots(socialRoots, { "VIPDoorParts" })
 	local vipBarriers = vipBarrierFolder or vipDoorParts
-	local lobbyModel = lobby and getChildByNames(lobby, { "Model" }) or nil
 	local groupReward = if lobby
 		then getChildByNames(lobby, { "GroupReward" }, nil, true)
 		else findDirectOrRecursiveInRoots(socialRoots, { "GroupReward" })
@@ -396,7 +394,6 @@ local function collectRefs(options)
 	refs.VipRefuge = vipRefuge
 	refs.VipBarriers = vipBarriers
 	refs.VipDoorParts = vipDoorParts or vipBarriers
-	refs.GearShopNpc = getChildByNames(lobbyModel, { "Normal" }, nil, true)
 	refs.SellNpc = findChildPathInRoots(activeMapRoots, { "NPC", "Sell", "Nami" }, nil, false)
 		or findChildPathInRoots(activeMapRoots, { "NPC", "Sell", "Nami" }, nil, true)
 	refs.AFKRayleighNpc = findChildPathInRoots(activeMapRoots, { "NPC", "AFK", "Rayleigh" }, nil, false)

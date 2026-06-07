@@ -1,6 +1,5 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
@@ -9,7 +8,7 @@ local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForC
 
 local HitResolver = {}
 
-local DEBUG = RunService:IsStudio()
+local HIT_RESOLVER_DEBUG_ATTRIBUTES = { "DebugHitResolver", "DebugHit", "DebugHieHit" }
 local DEFAULT_MAX_IGNORED_HITS = 12
 local DEFAULT_CLASSIFICATION_ORDER = { "Player", "Hazard", "Ignore", "Block" }
 local DEFAULT_DIRECT_CLASSIFICATION_ORDER = { "Player", "NPC", "Hazard", "Ignore", "Block" }
@@ -141,13 +140,23 @@ local function getOrderLabel(order)
 	return table.concat(order, ">")
 end
 
+local function isHitResolverDebugEnabled()
+	for _, attributeName in ipairs(HIT_RESOLVER_DEBUG_ATTRIBUTES) do
+		if hasTruthyAttribute(ReplicatedStorage, attributeName) or hasTruthyAttribute(game, attributeName) then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function getDebugEnabled(options)
 	if type(options) ~= "table" then
-		return DEBUG
+		return isHitResolverDebugEnabled()
 	end
 
 	if options.DebugEnabled == nil then
-		return DEBUG
+		return isHitResolverDebugEnabled()
 	end
 
 	return options.DebugEnabled == true
@@ -540,7 +549,7 @@ local function resolvePlayer(options, hitPart)
 	}, diagnostics
 end
 
-local function resolveNpc(options, hitPart)
+local function resolveNpc(_options, hitPart)
 	local diagnostics = {
 		HitInstance = hitPart,
 		Reason = HitResolver.Reasons.InvalidInstance,
@@ -1030,7 +1039,7 @@ local function resolveWorldSegmentBlock(options, startPosition, displacement)
 	local maxIgnoredHits = math.max(1, math.floor(tonumber(options.MaxIgnoredHits) or DEFAULT_MAX_IGNORED_HITS))
 	local affectableQueryOptions = getAffectableQueryOptions(options)
 
-	for attempt = 1, maxIgnoredHits do
+	for _attempt = 1, maxIgnoredHits do
 		local params = buildRaycastParams(options.ExcludeInstances, options.IgnoredInstances)
 		local castResult = castStep(startPosition, displacement, tonumber(options.QueryRadius) or 0, params, options)
 		if not castResult then
@@ -1375,7 +1384,7 @@ function HitResolver.ResolveCastStep(options)
 
 	local maxIgnoredHits = math.max(1, math.floor(tonumber(options.MaxIgnoredHits) or DEFAULT_MAX_IGNORED_HITS))
 
-	for attempt = 1, maxIgnoredHits do
+	for _attempt = 1, maxIgnoredHits do
 		local params = buildRaycastParams(options.ExcludeInstances, options.IgnoredInstances)
 		local castResult = castStep(origin, displacement, tonumber(options.Radius) or 0, params, options)
 		if not castResult then

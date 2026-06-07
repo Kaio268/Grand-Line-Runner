@@ -1,6 +1,5 @@
 local LogService = game:GetService("LogService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local AnimationLoadDiagnostics = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("AnimationLoadDiagnostics"))
 local DiagnosticLogLimiter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
@@ -18,7 +17,7 @@ local RIG_ATTRIBUTE_NAMES = {
 	"RigTypeName",
 	"RigName",
 }
-local DEBUG_INFO = RunService:IsStudio()
+local DEBUG_ATTRIBUTE = "DebugEatAnimationClient"
 local INFO_COOLDOWN = 0.35
 local WARN_COOLDOWN = 3
 local ANIMATE_WARN_COOLDOWN = 4
@@ -38,8 +37,12 @@ local animateErrorObserved = false
 local animateDiagnosticEmitting = false
 local activePlaybackInfo = nil
 
+local function isDebugInfoEnabled()
+	return ReplicatedStorage:GetAttribute(DEBUG_ATTRIBUTE) == true or game:GetAttribute(DEBUG_ATTRIBUTE) == true
+end
+
 local function logInfo(message, ...)
-	if not DEBUG_INFO then
+	if not isDebugInfoEnabled() then
 		return
 	end
 
@@ -170,7 +173,7 @@ local function applyAnimateGuard(character, reason)
 
 	if not guardState.WasDisabled then
 		animate.Disabled = true
-		if DEBUG_INFO and DiagnosticLogLimiter.ShouldEmit("EatAnimationClient:ANIMATEGUARD", guardState.Reason, 2) then
+		if isDebugInfoEnabled() and DiagnosticLogLimiter.ShouldEmit("EatAnimationClient:ANIMATEGUARD", guardState.Reason, 2) then
 			print(string.format("[ANIMATE] guard applied for missing move state reason=%s", guardState.Reason))
 		end
 	end

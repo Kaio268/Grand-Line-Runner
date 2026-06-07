@@ -1,6 +1,5 @@
 local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local DiagnosticLogLimiter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
@@ -8,7 +7,7 @@ local HieConfig = require(script.Parent:WaitForChild("HieConfig"))
 
 local HieVfx = {}
 
-local DEBUG_ENABLED = RunService:IsStudio()
+local HIE_VFX_DEBUG_ATTRIBUTES = { "DebugHie", "DebugHieVfx", "DebugHieVFX" }
 local ROOT_SEGMENTS = { "Assets", "VFX", "Hie" }
 local FREEZE_SHOT_NAME = "Freeze Shot"
 local ICE_BOOST_NAME = "Ice Boost"
@@ -48,8 +47,22 @@ local ICE_BOOST_ROOT_OFFSET = CFrame.new(0, -2.5, 0)
 local INFO_COOLDOWN = 0.25
 local WARN_COOLDOWN = 3
 
+local function hasDebugAttribute(attributeNames)
+	for _, attributeName in ipairs(attributeNames) do
+		if ReplicatedStorage:GetAttribute(attributeName) == true or game:GetAttribute(attributeName) == true then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function isHieVfxDebugEnabled()
+	return hasDebugAttribute(HIE_VFX_DEBUG_ATTRIBUTES)
+end
+
 local function debugLog(message, ...)
-	if not DEBUG_ENABLED then
+	if not isHieVfxDebugEnabled() then
 		return
 	end
 
@@ -713,7 +726,7 @@ function HieVfx.CleanupFreezeShotProjectile(state, reason)
 	end
 
 	destroyState(state)
-	if DEBUG_ENABLED then
+	if isHieVfxDebugEnabled() then
 		debugLog("Freeze Shot cleanup complete reason=%s", tostring(reason))
 	end
 end
@@ -785,7 +798,7 @@ function HieVfx.CleanupIceBoostEffect(state, reason)
 	end
 
 	destroyState(state)
-	if DEBUG_ENABLED then
+	if isHieVfxDebugEnabled() then
 		debugLog("Ice Boost cleanup complete reason=%s", tostring(reason))
 	end
 end

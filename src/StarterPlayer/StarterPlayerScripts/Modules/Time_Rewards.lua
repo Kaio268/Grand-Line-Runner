@@ -1925,6 +1925,10 @@ local function logSyncRequestStop(reason: string)
 end
 
 local function logSnapshotStatus(tag: string, ...)
+	if GIFT_SYNC_CLIENT_DEBUG ~= true and game:GetAttribute("GiftSnapshotDebug") ~= true then
+		return
+	end
+
 	print(tag, ...)
 end
 

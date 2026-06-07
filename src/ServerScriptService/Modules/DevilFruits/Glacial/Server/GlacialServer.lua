@@ -19,8 +19,8 @@ local TitleProgressService = require(ServerScriptService:WaitForChild("Modules")
 
 local GlacialServer = {}
 
-local DEBUG = RunService:IsStudio()
-local VERBOSE_DEBUG = false
+local DEBUG_ATTRIBUTES = { "DebugHie", "DebugHieServer", "DebugGlacialServer" }
+local VERBOSE_DEBUG_ATTRIBUTES = { "DebugHieVerbose", "DebugHieServerVerbose", "DebugGlacialServerVerbose" }
 local PROJECTILE_VERTICAL_OFFSET = 1.2
 local DEFAULT_PROJECTILE_HAND_FORWARD_OFFSET = 2.5
 local PROJECTILE_LIFETIME_GRACE = 0.1
@@ -77,8 +77,26 @@ local activeIceBoostByPlayer = setmetatable({}, { __mode = "k" })
 local activeFreezePresentationsByTarget = setmetatable({}, { __mode = "k" })
 local cachedFreezeVisualTemplate = nil
 
+local function hasDebugAttribute(attributeNames)
+	for _, attributeName in ipairs(attributeNames) do
+		if ReplicatedStorage:GetAttribute(attributeName) == true or game:GetAttribute(attributeName) == true then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function isHieDebugEnabled()
+	return hasDebugAttribute(DEBUG_ATTRIBUTES)
+end
+
+local function isHieVerboseDebugEnabled()
+	return isHieDebugEnabled() and hasDebugAttribute(VERBOSE_DEBUG_ATTRIBUTES)
+end
+
 local function logMessage(tag, message, ...)
-	if not DEBUG then
+	if not isHieDebugEnabled() then
 		return
 	end
 
@@ -86,7 +104,7 @@ local function logMessage(tag, message, ...)
 end
 
 local function logVerbose(message, ...)
-	if not (DEBUG and VERBOSE_DEBUG) then
+	if not isHieVerboseDebugEnabled() then
 		return
 	end
 
@@ -765,7 +783,7 @@ local function resolveProjectileStep(state, origin, displacement)
 		RequireCanFreeze = true,
 		IgnoreHelperNames = IGNORED_HELPER_NAMES,
 		MaxIgnoredHits = MAX_IGNORED_HITS_PER_STEP,
-		DebugEnabled = DEBUG,
+		DebugEnabled = isHieDebugEnabled(),
 		TracePrefix = "HIT",
 	})
 
@@ -1256,7 +1274,7 @@ local function triggerImpactBurst(_context, state, impactPosition, triggerKind, 
 		AllowedEntityTypes = FREEZE_SHOT_ALLOWED_ENTITY_TYPES,
 		RequireCanFreeze = true,
 		MaxMatches = 12,
-		DebugEnabled = DEBUG,
+		DebugEnabled = isHieDebugEnabled(),
 		TracePrefix = "HIT",
 	})
 
@@ -1531,7 +1549,7 @@ local function simulateProjectile(context, state)
 		if stepResolution.Status == HitResolver.ResultKind.NoHit then
 			state.Position += displacement
 			state.DistanceTraveled += stepDistance
-			if VERBOSE_DEBUG and elapsed >= state.NextVerboseLogAt then
+			if isHieVerboseDebugEnabled() and elapsed >= state.NextVerboseLogAt then
 				state.NextVerboseLogAt = elapsed + VERBOSE_STEP_INTERVAL
 				logMessage(
 					"MOVE",

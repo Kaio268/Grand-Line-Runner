@@ -413,6 +413,35 @@ local function getActorName(options)
 	return tostring(options.Actor or "unknown")
 end
 
+local function isProjectionReportDebugEnabled()
+	return game:GetAttribute("CrewMemberShadowReportDebug") == true
+		or game:GetAttribute("CrewMemberShadowWriterDebug") == true
+end
+
+local function hasProjectionIssue(result)
+	if typeof(result) ~= "table" then
+		return false
+	end
+	if result.StrictFailure == true then
+		return true
+	end
+
+	local validation = result.Validation
+	if typeof(validation) ~= "table" then
+		return false
+	end
+
+	return (tonumber(validation.MismatchCount) or 0) > 0
+		or (tonumber(validation.StandIssueCount) or 0) > 0
+		or (tonumber(validation.DuplicateIssueCount) or 0) > 0
+		or (tonumber(validation.UnknownLegacyIdCount) or 0) > 0
+		or (tonumber(validation.CompatibilityOnlyIdCount) or 0) > 0
+		or (tonumber(validation.PendingIncomeSyncCount) or 0) > 0
+		or (tonumber(validation.BlockingIncomeMismatchCount) or 0) > 0
+		or (tonumber(validation.ShadowMirrorIssueCount) or 0) > 0
+		or (tonumber(validation.BlockingIssueCount) or 0) > 0
+end
+
 local function clearCanonicalShadowKeys(root)
 	if typeof(root) ~= "table" then
 		return
@@ -429,6 +458,10 @@ local function clearCanonicalShadowKeys(root)
 end
 
 local function printProjectionResult(result)
+	if not isProjectionReportDebugEnabled() and not hasProjectionIssue(result) then
+		return
+	end
+
 	local validation = result.Validation
 	local reason = tostring(result.Reason or "unspecified")
 	if validation

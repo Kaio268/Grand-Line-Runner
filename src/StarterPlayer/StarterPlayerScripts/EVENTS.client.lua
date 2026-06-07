@@ -1,21 +1,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
-local mainEventsFolder = ReplicatedStorage:FindFirstChild("MainEvents") or ReplicatedStorage:WaitForChild("MainEvents", 10)
-local currentEventValue = Workspace:FindFirstChild("CurrentEvent") or Workspace:WaitForChild("CurrentEvent", 10)
-if not mainEventsFolder or not currentEventValue then
-	warn("[EVENTS] MainEvents or Workspace.CurrentEvent missing; event visual sync disabled.")
-	return
-end
-
-local eventsFolder = Workspace:FindFirstChild("Events")
-if not eventsFolder then
-	eventsFolder = Instance.new("Folder")
-	eventsFolder.Name = "Events"
-	eventsFolder.Parent = Workspace
-end
-
+local mainEventsFolder = nil
+local currentEventValue = nil
+local eventsFolder = nil
 local activeName = nil
+local started = false
 
 local function normalizeEventName(name)
 	name = tostring(name or "")
@@ -30,13 +20,31 @@ local function normalizeEventName(name)
 	return name
 end
 
+local function ensureEventsFolder()
+	eventsFolder = Workspace:FindFirstChild("Events")
+	if not eventsFolder then
+		eventsFolder = Instance.new("Folder")
+		eventsFolder.Name = "Events"
+		eventsFolder.Parent = Workspace
+	end
+	return eventsFolder
+end
+
 local function clearEvents()
+	if not eventsFolder then
+		return
+	end
+
 	for _, child in ipairs(eventsFolder:GetChildren()) do
 		child:Destroy()
 	end
 end
 
 local function applyEvent(eventNameRaw)
+	if not mainEventsFolder or not eventsFolder then
+		return
+	end
+
 	local eventName = normalizeEventName(eventNameRaw)
 	if activeName == eventName then
 		return
@@ -60,8 +68,41 @@ local function applyEvent(eventNameRaw)
 	activeName = eventName
 end
 
-applyEvent(currentEventValue.Value)
+local function tryStart()
+	if started then
+		return
+	end
 
-currentEventValue:GetPropertyChangedSignal("Value"):Connect(function()
+	mainEventsFolder = mainEventsFolder or ReplicatedStorage:FindFirstChild("MainEvents")
+	currentEventValue = currentEventValue or Workspace:FindFirstChild("CurrentEvent")
+	if not (mainEventsFolder and mainEventsFolder:IsA("Folder")) then
+		return
+	end
+	if not (currentEventValue and currentEventValue:IsA("StringValue")) then
+		return
+	end
+
+	started = true
+	ensureEventsFolder()
 	applyEvent(currentEventValue.Value)
+
+	currentEventValue:GetPropertyChangedSignal("Value"):Connect(function()
+		applyEvent(currentEventValue.Value)
+	end)
+end
+
+ReplicatedStorage.ChildAdded:Connect(function(child)
+	if child.Name == "MainEvents" then
+		mainEventsFolder = child
+		tryStart()
+	end
 end)
+
+Workspace.ChildAdded:Connect(function(child)
+	if child.Name == "CurrentEvent" then
+		currentEventValue = child
+		tryStart()
+	end
+end)
+
+tryStart()

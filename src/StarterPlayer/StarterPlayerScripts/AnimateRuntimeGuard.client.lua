@@ -23,10 +23,18 @@ local DEFAULT_ENABLED = true
 local TRANSITION_FADE_TIME = 0.12
 local SPEED_ADJUST_EPSILON = 0.05
 local SPEED_ADJUST_INTERVAL = 0.18
+local RUNTIME_PART_DISCOVERY_TIMEOUT = 5
+local RUNTIME_PART_RETRY_INTERVAL = 0.1
 local CATALOG_DISCOVERY_TIMEOUT = 4
 local CATALOG_RETRY_INTERVAL = 0.2
 local CATALOG_STATE_ORDER = { "Idle", "Walk", "Run", "Jump", "Fall", "Climb", "Swim", "SwimIdle", "Sit" }
 local REQUIRED_LOCOMOTION_KEYS = { "Idle", "Walk", "Jump", "Fall" }
+local RUNTIME_PART_ORDER = {
+	{ Key = "Humanoid", Name = "Humanoid" },
+	{ Key = "Animator", Name = "Animator" },
+	{ Key = "RootPart", Name = "HumanoidRootPart" },
+	{ Key = "Animate", Name = "Animate" },
+}
 local CATALOG_FOLDER_NAMES = {
 	Idle = "idle",
 	Walk = "walk",
@@ -397,41 +405,83 @@ local function destroyRuntimeState(state, reason)
 	state.Destroyed = true
 end
 
-local function getAnimator(character)
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		return nil, nil
-	end
-
-	local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid:FindFirstChild("Animator")
-	if animator and animator:IsA("Animator") then
-		return humanoid, animator
-	end
-
-	local ok, waitedAnimator = pcall(function()
-		return humanoid:WaitForChild("Animator", 2)
-	end)
-	if ok and waitedAnimator and waitedAnimator:IsA("Animator") then
-		return humanoid, waitedAnimator
-	end
-
-	return humanoid, nil
+local function isCurrentCharacter(character)
+	return typeof(character) == "Instance" and character.Parent ~= nil and player.Character == character
 end
 
-local function getRootPart(character)
-	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-	if rootPart and rootPart:IsA("BasePart") then
-		return rootPart
+local function findRuntimeParts(character)
+	local humanoid
+	if typeof(character) == "Instance" then
+		humanoid = character:FindFirstChildOfClass("Humanoid")
 	end
 
-	local ok, waitedRootPart = pcall(function()
-		return character and character:WaitForChild("HumanoidRootPart", 2)
-	end)
-	if ok and waitedRootPart and waitedRootPart:IsA("BasePart") then
-		return waitedRootPart
+	local animator
+	if humanoid then
+		animator = humanoid:FindFirstChildOfClass("Animator")
+		if not animator then
+			local namedAnimator = humanoid:FindFirstChild("Animator")
+			if namedAnimator and namedAnimator:IsA("Animator") then
+				animator = namedAnimator
+			end
+		end
 	end
 
-	return nil
+	local rootPart
+	if typeof(character) == "Instance" then
+		local candidateRootPart = character:FindFirstChild("HumanoidRootPart")
+		if candidateRootPart and candidateRootPart:IsA("BasePart") then
+			rootPart = candidateRootPart
+		end
+	end
+
+	local animate
+	if typeof(character) == "Instance" then
+		local candidateAnimate = character:FindFirstChild("Animate")
+		if candidateAnimate and candidateAnimate:IsA("LocalScript") then
+			animate = candidateAnimate
+		end
+	end
+
+	return {
+		Humanoid = humanoid,
+		Animator = animator,
+		RootPart = rootPart,
+		Animate = animate,
+	}
+end
+
+local function buildMissingRuntimePartNames(parts)
+	local missing = {}
+	parts = type(parts) == "table" and parts or {}
+	for _, descriptor in ipairs(RUNTIME_PART_ORDER) do
+		if not parts[descriptor.Key] then
+			missing[#missing + 1] = descriptor.Name
+		end
+	end
+
+	return missing
+end
+
+local function resolveRuntimeParts(character)
+	local deadline = os.clock() + RUNTIME_PART_DISCOVERY_TIMEOUT
+
+	while true do
+		if not isCurrentCharacter(character) then
+			return nil, "stale_character"
+		end
+
+		local parts = findRuntimeParts(character)
+		local missing = buildMissingRuntimePartNames(parts)
+		if #missing == 0 then
+			return parts, nil
+		end
+
+		if os.clock() >= deadline then
+			return parts, "missing_runtime_parts:" .. table.concat(missing, ",")
+		end
+
+		task.wait(RUNTIME_PART_RETRY_INTERVAL)
+	end
 end
 
 local function getTrackPriority(key)
@@ -728,6 +778,10 @@ local function playResolvedState(state, key, speed)
 end
 
 local function startRuntimeAnimate(character)
+	if not isCurrentCharacter(character) then
+		return
+	end
+
 	destroyRuntimeState(activeState, "startup_reset")
 	activeState = nil
 
@@ -736,20 +790,32 @@ local function startRuntimeAnimate(character)
 		return
 	end
 
-	local humanoid, animator = getAnimator(character)
-	local rootPart = getRootPart(character)
-	if not humanoid or not animator or not rootPart then
+	local runtimeParts, runtimePartFailure = resolveRuntimeParts(character)
+	if runtimePartFailure == "stale_character" then
+		return
+	end
+
+	if runtimePartFailure then
 		logWarn(
-			"startup fallback character=%s detail=missing_runtime_parts stockAnimateRetained=true",
-			tostring(character and character.Name or "<nil>")
+			"startup fallback character=%s detail=%s stockAnimateRetained=true",
+			tostring(character and character.Name or "<nil>"),
+			runtimePartFailure
 		)
 		return
 	end
 
+	local humanoid = runtimeParts.Humanoid
+	local animator = runtimeParts.Animator
+	local rootPart = runtimeParts.RootPart
 	local animationCatalog, catalogFailure = waitForAnimationCatalog(character)
-	local animate = animationCatalog.Animate
+	local animate = animationCatalog.Animate or runtimeParts.Animate
 	local validation = validateAnimationCatalog(animator, animationCatalog)
 	logCatalogDiagnostics(character, animationCatalog, validation)
+
+	if not isCurrentCharacter(character) then
+		stopTrackCollection(validation.Tracks)
+		return
+	end
 
 	if not validation.Ready then
 		stopTrackCollection(validation.Tracks)

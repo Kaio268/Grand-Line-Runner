@@ -59,7 +59,7 @@ end
 local function shouldDebug(config)
 	config = config or getConfig()
 	local debugAttribute = typeof(config.DebugAttribute) == "string" and config.DebugAttribute or "DebugFruitHoldPresentation"
-	return RunService:IsStudio() or ReplicatedStorage:GetAttribute(debugAttribute) == true
+	return ReplicatedStorage:GetAttribute(debugAttribute) == true or game:GetAttribute(debugAttribute) == true
 end
 
 local function logInfo(message, ...)
@@ -1254,9 +1254,11 @@ local function startState(player, character, tool, config)
 		)
 	end
 
-	scheduleR6GLiveGripDebug(state)
-	scheduleR6GResolvedPresentationDebug(state)
-	scheduleVisibleFruitOrientationDebug(state)
+	if shouldDebug(config) then
+		scheduleR6GLiveGripDebug(state)
+		scheduleR6GResolvedPresentationDebug(state)
+		scheduleVisibleFruitOrientationDebug(state)
+	end
 	return state
 end
 

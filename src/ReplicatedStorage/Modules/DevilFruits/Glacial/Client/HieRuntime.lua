@@ -1,6 +1,5 @@
 local Players = game:GetService("Players")
 local Debris = game:GetService("Debris")
-local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
@@ -24,16 +23,17 @@ HieClient.FRUIT_NAME = "Glacial Fruit"
 HieClient.FREEZE_SHOT_ABILITY = "FreezeShot"
 HieClient.ICE_BOOST_ABILITY = "IceBoost"
 
-local DEBUG_AIM = RunService:IsStudio()
-local DEBUG_VFX = RunService:IsStudio()
-local DEBUG_VFX_VERBOSE = false
+local HIE_CLIENT_DEBUG_ATTRIBUTES = { "DebugHie", "DebugHieClient" }
+local HIE_AIM_DEBUG_ATTRIBUTES = { "DebugHie", "DebugHieClient", "DebugHieAim" }
+local HIE_VFX_DEBUG_ATTRIBUTES = { "DebugHie", "DebugHieClient", "DebugHieVfx", "DebugHieVFX" }
+local HIE_VFX_VERBOSE_DEBUG_ATTRIBUTES = { "DebugHieVfxVerbose", "DebugHieVFXVerbose" }
+local HIE_SOUND_DEBUG_ATTRIBUTES = { "DebugHie", "DebugHieClient", "DebugHieSound" }
 local FREEZE_SHOT_HAND_FORWARD_OFFSET = 2.5
 local FREEZE_SHOT_MUZZLE_CACHE_TTL = 1
 local FREEZE_SHOT_LOCAL_CAST_LOCK_MIN_DURATION = 1
 local LOG_INFO_COOLDOWN = 0.2
 local LOG_WARN_COOLDOWN = 3
 local SOUND_CLEANUP_FALLBACK_SECONDS = 8
-local DEBUG_SOUND = RunService:IsStudio()
 local SOUND_FREEZE_SHOT_FIRE = "Fire"
 local SOUND_FREEZE_SHOT_IMPACT = "Impact"
 local SOUND_ICE_BOOST_LOOP = "Loop"
@@ -71,6 +71,36 @@ local AIM_HELPER_NAMES = {
 	RunHub = true,
 	DecreaseSpeed = true,
 }
+
+local function hasDebugAttribute(attributeNames)
+	for _, attributeName in ipairs(attributeNames) do
+		if ReplicatedStorage:GetAttribute(attributeName) == true or game:GetAttribute(attributeName) == true then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function isHieClientDebugEnabled()
+	return hasDebugAttribute(HIE_CLIENT_DEBUG_ATTRIBUTES)
+end
+
+local function isHieAimDebugEnabled()
+	return isHieClientDebugEnabled() or hasDebugAttribute(HIE_AIM_DEBUG_ATTRIBUTES)
+end
+
+local function isHieVfxDebugEnabled()
+	return isHieClientDebugEnabled() or hasDebugAttribute(HIE_VFX_DEBUG_ATTRIBUTES)
+end
+
+local function isHieVfxVerboseDebugEnabled()
+	return isHieVfxDebugEnabled() and hasDebugAttribute(HIE_VFX_VERBOSE_DEBUG_ATTRIBUTES)
+end
+
+local function isHieSoundDebugEnabled()
+	return isHieClientDebugEnabled() or hasDebugAttribute(HIE_SOUND_DEBUG_ATTRIBUTES)
+end
 
 local function restoreMappedWalkSpeed(player, humanoid)
 	if not (humanoid and humanoid.Parent and humanoid.Health > 0) then
@@ -150,7 +180,7 @@ local function describeFreezeShotPayload(payload)
 end
 
 local function logVfx(tag, message, ...)
-	if not DEBUG_VFX then
+	if not isHieVfxDebugEnabled() then
 		return
 	end
 
@@ -171,7 +201,7 @@ local function logVfx(tag, message, ...)
 end
 
 local function logVfxVerbose(message, ...)
-	if not (DEBUG_VFX and DEBUG_VFX_VERBOSE) then
+	if not isHieVfxVerboseDebugEnabled() then
 		return
 	end
 
@@ -191,7 +221,7 @@ local function logVfxError(message, ...)
 end
 
 local function hieSoundLog(message, ...)
-	if not DEBUG_SOUND then
+	if not isHieSoundDebugEnabled() then
 		return
 	end
 
@@ -203,10 +233,6 @@ local function hieSoundLog(message, ...)
 end
 
 local function hieSoundWarn(message, ...)
-	if not DEBUG_SOUND then
-		return
-	end
-
 	if not DiagnosticLogLimiter.ShouldEmit("HieClient:SOUND_WARN", DiagnosticLogLimiter.BuildKey(message, ...), LOG_WARN_COOLDOWN) then
 		return
 	end
@@ -227,7 +253,7 @@ local function getSoundPlayingState(sound)
 end
 
 local function logSoundDiagnostics(stage, abilityName, soundName, sound)
-	if not DEBUG_SOUND then
+	if not isHieSoundDebugEnabled() then
 		return
 	end
 
@@ -532,7 +558,7 @@ local function stopIceBoostLoop(state, reason)
 end
 
 local function logBurst(message, ...)
-	if not DEBUG_VFX then
+	if not isHieVfxDebugEnabled() then
 		return
 	end
 
@@ -552,7 +578,7 @@ local function warnBurst(message, ...)
 end
 
 local function logAim(tag, message, ...)
-	if not DEBUG_AIM then
+	if not isHieAimDebugEnabled() then
 		return
 	end
 
@@ -1784,7 +1810,7 @@ local function updateVisualOnlyProjectileMotion(projectileState, serverNow)
 				)
 				currentDirection = nextDirection
 				currentVelocity = currentDirection * projectileState.Speed
-				local canLogHoming = DEBUG_VFX and serverNow >= (projectileState.NextHomingLogAt or 0)
+				local canLogHoming = isHieVfxDebugEnabled() and serverNow >= (projectileState.NextHomingLogAt or 0)
 
 				if canLogHoming then
 					logBurst(
@@ -2245,7 +2271,7 @@ function HieClient:UpdateFreezeShots()
 			projectileState.CurrentDirection = currentVelocity.Magnitude > 0.01 and currentVelocity.Unit or projectileState.Direction
 		end
 
-		if DEBUG_VFX_VERBOSE then
+		if isHieVfxVerboseDebugEnabled() then
 			logVfxVerbose(
 				"projectileId=%s elapsed=%.2f distance=%.2f current=%s velocity=%s",
 				projectileId,
