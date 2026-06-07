@@ -9,6 +9,9 @@ local Workspace = game:GetService("Workspace")
 
 local MeraConfig = require(script.Parent.Parent:WaitForChild("MeraConfig"))
 local VfxCommon = require(script.Parent:WaitForChild("VfxCommon"))
+local VFXSchedulerService = require(
+	game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("VFXSchedulerService")
+)
 
 local FlameDashVfx = {}
 
@@ -119,6 +122,7 @@ local ALWAYS_DISABLED_HEAD_EMITTER_NAMES = {
 
 local runtimeSequence = 0
 local activeTrailLoopCount = 0
+local trailTaskSerial = 0
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -1044,6 +1048,49 @@ local function updateTrailDirectionFromMovement(state, currentPosition, previous
 	return delta, planarDelta.Magnitude
 end
 
+local function stepTrailSampling(state)
+	if not isLiveState(state) or state.Stopped == true or state.TrailSamplingStopped == true then
+		disconnectTrailLoop(state)
+		return false
+	end
+
+	local currentPosition = state.RootPart.Position
+	local previousPosition = state.LastSamplePosition or currentPosition
+	local delta, planarDistance = updateTrailDirectionFromMovement(state, currentPosition, previousPosition)
+	local distance = delta.Magnitude
+
+	if distance > 0.001 and planarDistance > 0.001 then
+		local spacing = math.max(0.3, tonumber(state.TrailSpacing) or DEFAULT_TRAIL_SPACING)
+		local carriedDistance = math.max(0, tonumber(state.DistanceSinceLastClone) or 0)
+		local remaining = distance
+		local traveled = 0
+		local clonesSpawned = 0
+
+		while remaining > 0 and clonesSpawned < state.MaxTrailClonesPerStep do
+			local toNext = spacing - carriedDistance
+			if toNext > remaining then
+				carriedDistance += remaining
+				remaining = 0
+				break
+			end
+
+			traveled += toNext
+			remaining -= toNext
+			carriedDistance = 0
+			clonesSpawned += 1
+
+			local alpha = math.clamp(traveled / distance, 0, 1)
+			local samplePosition = previousPosition:Lerp(currentPosition, alpha)
+			spawnTrailCloneAt(state, samplePosition, state.LastTrailDirection)
+		end
+
+		state.DistanceSinceLastClone = math.min(spacing, carriedDistance)
+	end
+
+	state.LastSamplePosition = currentPosition
+	return true
+end
+
 local function ensureTrailLoop(state)
 	if not isLiveState(state) then
 		return false
@@ -1057,47 +1104,35 @@ local function ensureTrailLoop(state)
 		return true
 	end
 
-	state.TrailConnection = RunService.Heartbeat:Connect(function(_dt)
-		if not isLiveState(state) or state.Stopped == true or state.TrailSamplingStopped == true then
-			disconnectTrailLoop(state)
-			return
-		end
-
-		local currentPosition = state.RootPart.Position
-		local previousPosition = state.LastSamplePosition or currentPosition
-		local delta, planarDistance = updateTrailDirectionFromMovement(state, currentPosition, previousPosition)
-		local distance = delta.Magnitude
-
-		if distance > 0.001 and planarDistance > 0.001 then
-			local spacing = math.max(0.3, tonumber(state.TrailSpacing) or DEFAULT_TRAIL_SPACING)
-			local carriedDistance = math.max(0, tonumber(state.DistanceSinceLastClone) or 0)
-			local remaining = distance
-			local traveled = 0
-			local clonesSpawned = 0
-
-			while remaining > 0 and clonesSpawned < state.MaxTrailClonesPerStep do
-				local toNext = spacing - carriedDistance
-				if toNext > remaining then
-					carriedDistance += remaining
-					remaining = 0
+	trailTaskSerial += 1
+	state.TrailConnection = VFXSchedulerService.ScheduleHeartbeat(
+		"flame-dash-trail:" .. tostring(trailTaskSerial),
+		function()
+			return stepTrailSampling(state)
+		end,
+		{
+			Priority = 8,
+		}
+	)
+	if not state.TrailConnection then
+		local disconnected = false
+		state.TrailConnection = {
+			Disconnect = function()
+				disconnected = true
+			end,
+			IsConnected = function()
+				return not disconnected
+			end,
+		}
+		task.spawn(function()
+			while not disconnected do
+				task.wait()
+				if stepTrailSampling(state) == false then
 					break
 				end
-
-				traveled += toNext
-				remaining -= toNext
-				carriedDistance = 0
-				clonesSpawned += 1
-
-				local alpha = math.clamp(traveled / distance, 0, 1)
-				local samplePosition = previousPosition:Lerp(currentPosition, alpha)
-				spawnTrailCloneAt(state, samplePosition, state.LastTrailDirection)
 			end
-
-			state.DistanceSinceLastClone = math.min(spacing, carriedDistance)
-		end
-
-		state.LastSamplePosition = currentPosition
-	end)
+		end)
+	end
 	state.TrailLoopCounted = true
 	activeTrailLoopCount += 1
 

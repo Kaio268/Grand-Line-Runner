@@ -12,6 +12,7 @@ local HudLayout = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud
 local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
+local UIPerformanceService = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("UIPerformanceService"))
 local DevilFruitAssets = require(
 	ReplicatedStorage
 		:WaitForChild("Modules")
@@ -59,6 +60,8 @@ local REWARD_EASING_DIRECTION_IN = Enum.EasingDirection.Out
 local activePopups = {}
 local activeRewardTweens = setmetatable({}, { __mode = "k" })
 local rewardPoolWarmStarted = false
+local popupExpiryHandle = nil
+local popupExpiryFallbackRunning = false
 
 local function getTransientUiScale()
 	local mode = Responsive.getHudLayoutMode()
@@ -315,11 +318,13 @@ local function warmRewardPool()
 	end)
 end
 
-RunService.Heartbeat:Connect(function()
+local function processPopupExpirations()
 	local now = tick()
+	local expiredCount = 0
 	for baseText, data in pairs(activePopups) do
 		if not data.removalInProgress and now >= data.expirationTime then
 			data.removalInProgress = true
+			expiredCount += 1
 			local popup = data.popup
 			local uiScale = popup:FindFirstChildOfClass("UIScale")
 			local tweenInfo = TweenInfo.new(0.25, EASING_STYLE_OUT, EASING_DIRECTION_OUT)
@@ -337,8 +342,44 @@ RunService.Heartbeat:Connect(function()
 			end)
 		end
 	end
-end)
 
+	if expiredCount > 0 then
+		UIPerformanceService.RecordPopupExpiry(expiredCount)
+	end
+
+	return next(activePopups) ~= nil
+end
+
+local function ensurePopupExpiryLoop()
+	if popupExpiryHandle and popupExpiryHandle:IsConnected() then
+		return
+	end
+
+	popupExpiryHandle = UIPerformanceService.ScheduleHeartbeat("popup-expiry", function()
+		return processPopupExpirations()
+	end, {
+		Interval = 0,
+		Priority = 0,
+		OnStop = function()
+			popupExpiryHandle = nil
+		end,
+	})
+
+	if popupExpiryHandle then
+		return
+	end
+
+	if popupExpiryFallbackRunning then
+		return
+	end
+	popupExpiryFallbackRunning = true
+	task.spawn(function()
+		while processPopupExpirations() do
+			task.wait()
+		end
+		popupExpiryFallbackRunning = false
+	end)
+end
 
 function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isError)
 	local player = Players.LocalPlayer
@@ -368,6 +409,7 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 		popup.TextColor3, popup.TextStrokeColor3 = textColor, strokeColor
 		data.expirationTime = tick() + duration
 		playSound(isError and "Error" or "Success")
+		ensurePopupExpiryLoop()
 		return
 	end
 
@@ -394,6 +436,7 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 		removalInProgress = false,
 		outTween = nil
 	}
+	ensurePopupExpiryLoop()
 end
 
 function PopUpModule:Local_ShowReward(rewardTable)
@@ -1664,15 +1707,7 @@ function PopUpModule:Local_PromptGamepass(player, id)
 				iconRotTween:Play()
 
 				-- Animacja SunBurst (ciągłe kręcenie)
-				local sunBurstRotation = 0
-				local lastTime = tick()
-				local sunBurstConnection
-				sunBurstConnection = RunService.RenderStepped:Connect(function()
-					local now = tick()
-					sunBurstRotation = (sunBurstRotation + (now - lastTime) * REWARD_ROTATION_SPEED * 2) % 360
-					sunBurst.Rotation = sunBurstRotation
-					lastTime = now
-				end)
+				local sunBurstConnection = nil
 
 				-- Dodatkowe efekty - pulsowanie tekstu
 				local textPulseTween = TweenService:Create(

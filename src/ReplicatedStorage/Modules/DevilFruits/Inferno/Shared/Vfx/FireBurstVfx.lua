@@ -17,12 +17,14 @@
 	- clean up the whole authored root after particles finish
 ]]
 
-local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local MeraConfig = require(script.Parent.Parent:WaitForChild("MeraConfig"))
 local VfxCommon = require(script.Parent:WaitForChild("VfxCommon"))
+local VFXSchedulerService = require(
+	game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("VFXSchedulerService")
+)
 
 local FireBurstVfx = {}
 
@@ -145,6 +147,11 @@ end
 
 local function cancelTask(taskHandle)
 	if taskHandle == nil then
+		return
+	end
+
+	if typeof(taskHandle) == "table" and typeof(taskHandle.Disconnect) == "function" then
+		taskHandle:Disconnect("cancel")
 		return
 	end
 
@@ -627,8 +634,7 @@ local function scheduleDestroy(state, delaySeconds)
 	cancelTask(state.CleanupTask)
 	local clone = state.Clone
 	local resolvedDelay = math.max(0, tonumber(delaySeconds) or 0)
-	Debris:AddItem(clone, resolvedDelay + 1)
-	state.CleanupTask = task.delay(resolvedDelay, function()
+	state.CleanupTask = VFXSchedulerService.ScheduleDelay("fire-burst-cleanup:" .. tostring(state), resolvedDelay, function()
 		if state.Clone ~= clone then
 			return
 		end

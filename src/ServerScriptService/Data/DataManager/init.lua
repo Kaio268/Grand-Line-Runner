@@ -319,6 +319,7 @@ local APPROVED_LEGACY_WRITE_SOURCES = {
 
 local WRAPPER_LEGACY_USAGE_SOURCES = {
 	FirstTimeTutorialService = true,
+	AdminCommandBootstrap = true,
 	DevilFruitDevCommands = true,
 	Index = true,
 }

@@ -14,6 +14,8 @@ local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild(
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local GameSounds = require(Modules:WaitForChild("GameSounds"))
+local RuntimeScheduler = require(Modules:WaitForChild("RuntimeScheduler"))
+local PerformanceFlags = require(Modules:WaitForChild("Configs"):WaitForChild("PerformanceArchitectureFlags"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 local HazardProtection = require(
 	ServerScriptService:WaitForChild("Modules")
@@ -268,6 +270,8 @@ local SPIKE_HITBOX_ROLE_ATTRIBUTES = {
 
 local rng = Random.new()
 local activeControllers = {}
+local scheduledSpikeHolds = {}
+local spikeHoldTaskHandle = nil
 local dormantByCrewModel = setmetatable({}, { __mode = "k" })
 local normalLoopStarted = false
 local templateCacheByArea = {}
@@ -1230,6 +1234,7 @@ local function makeController(model, hitbox, warning, visual, hiddenCFrame, exte
 		end
 
 		self.Destroyed = true
+		scheduledSpikeHolds[self] = nil
 		activeControllers[self.Model] = nil
 		if self.CrewModel and dormantByCrewModel[self.CrewModel] == self then
 			dormantByCrewModel[self.CrewModel] = nil
@@ -1548,6 +1553,74 @@ local function damagePlayersInside(controller)
 	end
 end
 
+local function ensureSpikeHoldTask()
+	if spikeHoldTaskHandle and spikeHoldTaskHandle:IsConnected() then
+		return
+	end
+
+	if not PerformanceFlags.IsEnabled("RuntimeSchedulerEnabled") or not PerformanceFlags.IsEnabled("HazardSchedulerEnabled") then
+		return
+	end
+
+	spikeHoldTaskHandle = RuntimeScheduler.GetDefault():Schedule({
+		Id = "SpikeRuntimeService.ActiveHolds",
+		Phase = "Heartbeat",
+		Priority = 13,
+		Callback = function(dt)
+			local hasActive = false
+			for controller in pairs(scheduledSpikeHolds) do
+				if controller.Destroyed or not controller.Model.Parent then
+					scheduledSpikeHolds[controller] = nil
+				else
+					hasActive = true
+					controller.HoldElapsed = (tonumber(controller.HoldElapsed) or 0) + dt
+					damagePlayersInside(controller)
+					if controller.HoldElapsed >= (controller.HoldTime or CONFIG.FallbackHoldTime) then
+						scheduledSpikeHolds[controller] = nil
+						controller.Active = false
+						tweenVisual(controller, controller.HiddenCFrame, CONFIG.RetractTime, Enum.EasingDirection.In)
+						controller:Destroy()
+					end
+				end
+			end
+
+			if not hasActive then
+				return false
+			end
+			return true
+		end,
+		OnStop = function()
+			spikeHoldTaskHandle = nil
+		end,
+	})
+end
+
+local function scheduleSpikeHold(controller)
+	controller.HoldElapsed = 0
+	scheduledSpikeHolds[controller] = true
+	if not PerformanceFlags.IsEnabled("RuntimeSchedulerEnabled") or not PerformanceFlags.IsEnabled("HazardSchedulerEnabled") then
+		task.spawn(function()
+			while controller.HoldElapsed < (controller.HoldTime or CONFIG.FallbackHoldTime) do
+				if controller.Destroyed or not controller.Model.Parent then
+					scheduledSpikeHolds[controller] = nil
+					return
+				end
+				local dt = task.wait()
+				controller.HoldElapsed += dt
+				damagePlayersInside(controller)
+			end
+
+			scheduledSpikeHolds[controller] = nil
+			controller.Active = false
+			tweenVisual(controller, controller.HiddenCFrame, CONFIG.RetractTime, Enum.EasingDirection.In)
+			controller:Destroy()
+		end)
+		return
+	end
+
+	ensureSpikeHoldTask()
+end
+
 local function getControllerSoundPosition(controller)
 	if not controller then
 		return nil
@@ -1594,20 +1667,7 @@ local function runDeckSpike(controller, options)
 	tweenVisual(controller, controller.ExtendedCFrame, CONFIG.ThrustTime, Enum.EasingDirection.Out)
 	damagePlayersInside(controller)
 
-	local elapsed = 0
-	while elapsed < (controller.HoldTime or CONFIG.FallbackHoldTime) do
-		if controller.Destroyed or not controller.Model.Parent then
-			return
-		end
-
-		local dt = RunService.Heartbeat:Wait()
-		elapsed += dt
-		damagePlayersInside(controller)
-	end
-
-	controller.Active = false
-	tweenVisual(controller, controller.HiddenCFrame, CONFIG.RetractTime, Enum.EasingDirection.In)
-	controller:Destroy()
+	scheduleSpikeHold(controller)
 end
 
 local function getActiveSpikeCountsBySurface()

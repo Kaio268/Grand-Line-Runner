@@ -3,7 +3,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GearToolsFolder = ReplicatedStorage:FindFirstChild("Gears") or ReplicatedStorage:WaitForChild("Gears", 10)
 if not GearToolsFolder then
-	warn("[EquipGear] ReplicatedStorage.Gears is missing; gear equip sync disabled.")
 	return
 end
 

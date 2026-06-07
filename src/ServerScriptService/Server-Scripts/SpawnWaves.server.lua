@@ -17,6 +17,8 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
+local RuntimeScheduler = require(Modules:WaitForChild("RuntimeScheduler"))
+local PerformanceFlags = require(Modules:WaitForChild("Configs"):WaitForChild("PerformanceArchitectureFlags"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local ServerScriptService = game:GetService("ServerScriptService")
 local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
@@ -110,7 +112,13 @@ local HAZARD_ACTION_REMOTE_NAME = "SharedHazardAction"
 local rng = Random.new()
 local traceStateKey = nil
 local activeHazardStates = {}
+local waveMovementTaskHandle = nil
+local waveMovementFallbackRunning = false
+local ensureWaveMovementTask = nil
 local playerWaveSweepStates = {}
+local waveSweepTaskHandle = nil
+local waveSweepFallbackRunning = false
+local sweepScanQueued = false
 local diagnosticsHazardsFolder = nil
 local warningKeys = {}
 local waveDiagnostics = {
@@ -1295,53 +1303,7 @@ local function createServerHazardController(
 		end
 	end)
 
-	task.spawn(function()
-		if distance <= 1e-4 then
-			controller.Alpha = 1
-			controller.CurrentCFrame = endCF
-			controller.Position = endCF.Position
-			setPivot(hazardRoot, endCF)
-			controller:Destroy()
-			return
-		end
-
-		--ZIG ZAG
-
-		while hazardRoot.Parent and not controller.Destroyed and controller.Alpha < 1 do
-			local dt = RunService.Heartbeat:Wait()
-
-			if os.clock() >= controller.FrozenUntil then
-				local updateStartedAt = os.clock()
-				controller.ActiveSeconds += dt
-				local currentCF, alpha = WaveHazardVisuals.ComputeTimelineCFrame(
-					startCF,
-					endCF,
-					controller.ActiveSeconds,
-					speed,
-					distance,
-					lateralDirection,
-					initialOffset,
-					lateralVelocity,
-					maxDrift,
-					minOffset,
-					maxOffset
-				)
-
-				controller.Alpha = alpha
-
-				controller.CurrentCFrame = currentCF
-				controller.Position = currentCF.Position
-				setPivot(hazardRoot, currentCF)
-				recordWaveUpdateTime(os.clock() - updateStartedAt)
-			end
-		end
-
-		controller.Alpha = 1
-		controller.ActiveSeconds = distance / math.max(speed, 1e-3)
-		controller.CurrentCFrame = endCF
-		controller.Position = endCF.Position
-		controller:Destroy()
-	end)
+	ensureWaveMovementTask()
 end
 
 local function resetPlayerWaveSweepState(player)
@@ -1417,18 +1379,54 @@ local function scanPlayersForWaveHits()
 	end
 end
 
-local sweepScanQueued = false
-RunService.Heartbeat:Connect(function()
-	if sweepScanQueued then
+local function ensureWaveSweepTask()
+	if waveSweepTaskHandle and waveSweepTaskHandle:IsConnected() then
 		return
 	end
 
-	sweepScanQueued = true
-	task.defer(function()
-		sweepScanQueued = false
-		scanPlayersForWaveHits()
-	end)
-end)
+	if not PerformanceFlags.IsEnabled("RuntimeSchedulerEnabled") or not PerformanceFlags.IsEnabled("HazardSchedulerEnabled") then
+		if waveSweepFallbackRunning then
+			return
+		end
+		waveSweepFallbackRunning = true
+		task.spawn(function()
+			while waveSweepFallbackRunning do
+				if not sweepScanQueued then
+					sweepScanQueued = true
+					task.defer(function()
+						sweepScanQueued = false
+						scanPlayersForWaveHits()
+					end)
+				end
+				task.wait()
+			end
+		end)
+		return
+	end
+
+	waveSweepTaskHandle = RuntimeScheduler.GetDefault():Schedule({
+		Id = "SpawnWaves.PlayerSweep",
+		Phase = "Heartbeat",
+		Priority = 10,
+		Callback = function()
+			if sweepScanQueued then
+				return true
+			end
+
+			sweepScanQueued = true
+			task.defer(function()
+				sweepScanQueued = false
+				scanPlayersForWaveHits()
+			end)
+			return true
+		end,
+		OnStop = function()
+			waveSweepTaskHandle = nil
+		end,
+	})
+end
+
+ensureWaveSweepTask()
 
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function()
@@ -1449,6 +1447,114 @@ for _, player in ipairs(Players:GetPlayers()) do
 	player.CharacterRemoving:Connect(function()
 		resetPlayerWaveSweepState(player)
 	end)
+end
+
+local function stepWaveController(controller, dt)
+	if not controller or controller.Destroyed or not controller.HazardRoot.Parent then
+		return false
+	end
+
+	if controller.Distance <= 1e-4 then
+		controller.Alpha = 1
+		controller.CurrentCFrame = controller.EndCFrame
+		controller.Position = controller.EndCFrame.Position
+		setPivot(controller.HazardRoot, controller.EndCFrame)
+		controller:Destroy()
+		return false
+	end
+
+	if os.clock() < controller.FrozenUntil then
+		return true
+	end
+
+	local updateStartedAt = os.clock()
+	controller.ActiveSeconds += dt
+	local currentCF, alpha = WaveHazardVisuals.ComputeTimelineCFrame(
+		controller.StartCFrame,
+		controller.EndCFrame,
+		controller.ActiveSeconds,
+		controller.Speed,
+		controller.Distance,
+		controller.LateralDirection,
+		controller.InitialLateralOffset,
+		controller.LateralVelocity,
+		controller.MaxDrift,
+		controller.LateralMinOffset,
+		controller.LateralMaxOffset
+	)
+
+	controller.Alpha = alpha
+	controller.CurrentCFrame = currentCF
+	controller.Position = currentCF.Position
+	setPivot(controller.HazardRoot, currentCF)
+	recordWaveUpdateTime(os.clock() - updateStartedAt)
+
+	if controller.Alpha >= 1 then
+		controller.Alpha = 1
+		controller.ActiveSeconds = controller.Distance / math.max(controller.Speed, 1e-3)
+		controller.CurrentCFrame = controller.EndCFrame
+		controller.Position = controller.EndCFrame.Position
+		controller:Destroy()
+		return false
+	end
+
+	return true
+end
+
+ensureWaveMovementTask = function()
+	if waveMovementTaskHandle and waveMovementTaskHandle:IsConnected() then
+		return
+	end
+
+	if not PerformanceFlags.IsEnabled("RuntimeSchedulerEnabled") or not PerformanceFlags.IsEnabled("HazardSchedulerEnabled") then
+		if waveMovementFallbackRunning then
+			return
+		end
+		waveMovementFallbackRunning = true
+		task.spawn(function()
+			while waveMovementFallbackRunning do
+				local dt = task.wait()
+				local hasActive = false
+				for hazardRoot, controller in pairs(activeHazardStates) do
+					if not controller or controller.Destroyed or not hazardRoot.Parent then
+						activeHazardStates[hazardRoot] = nil
+					else
+						hasActive = true
+						stepWaveController(controller, dt)
+					end
+				end
+				if not hasActive then
+					waveMovementFallbackRunning = false
+				end
+			end
+		end)
+		return
+	end
+
+	waveMovementTaskHandle = RuntimeScheduler.GetDefault():Schedule({
+		Id = "SpawnWaves.ActiveMovement",
+		Phase = "Heartbeat",
+		Priority = 20,
+		Callback = function(dt)
+			local hasActive = false
+			for hazardRoot, controller in pairs(activeHazardStates) do
+				if not controller or controller.Destroyed or not hazardRoot.Parent then
+					activeHazardStates[hazardRoot] = nil
+				else
+					hasActive = true
+					stepWaveController(controller, dt)
+				end
+			end
+
+			if not hasActive then
+				return false
+			end
+			return true
+		end,
+		OnStop = function()
+			waveMovementTaskHandle = nil
+		end,
+	})
 end
 
 local noDisastersTimer = Workspace:FindFirstChild("NoDisastersTimer") or Workspace:WaitForChild("NoDisastersTimer", 15)

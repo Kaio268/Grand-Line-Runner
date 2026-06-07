@@ -1,14 +1,50 @@
 local TweenService   = game:GetService("TweenService")
 local RS             = game:GetService("ReplicatedStorage")
-local RunService     = game:GetService("RunService")
 local Players        = game:GetService("Players")
 local Debris         = game:GetService("Debris")
 local SoundService   = game:GetService("SoundService")
+local VFXSchedulerService = require(RS:WaitForChild("Modules"):WaitForChild("VFXSchedulerService"))
 
 local player   = Players.LocalPlayer
-local camera   = workspace.CurrentCamera
 
 local module = {}
+local renderLoopSerial = 0
+
+local function scheduleRenderLoop(prefix, callback)
+	renderLoopSerial += 1
+	local disconnected = false
+	local handle = VFXSchedulerService.ScheduleRender(prefix .. ":" .. tostring(renderLoopSerial), function(dt, now)
+		if disconnected then
+			return false
+		end
+
+		local keepRunning = callback(dt, now)
+		return keepRunning ~= false
+	end)
+
+	if handle then
+		return handle
+	end
+
+	task.spawn(function()
+		while not disconnected do
+			local dt = task.wait()
+			local keepRunning = callback(dt, os.clock())
+			if keepRunning == false then
+				break
+			end
+		end
+	end)
+
+	return {
+		Disconnect = function()
+			disconnected = true
+		end,
+		IsConnected = function()
+			return not disconnected
+		end,
+	}
+end
 
 local CFG = {
 	TokensPerBurst     = 6,
@@ -33,13 +69,26 @@ local CFG = {
 	FlyDuration        = 1.0,
 }
 
-local function rand(a: number, b: number) return a + (b-a)*math.random() end
-local function clamp01(x: number) return x<0 and 0 or (x>1 and 1 or x) end
-local function easeOutCubic(t: number) t = clamp01(t); local k = 1-t; return 1 - k*k*k end
+local function rand(a: number, b: number)
+	return a + (b - a) * math.random()
+end
+
+local function clamp01(x: number)
+	return x < 0 and 0 or (x > 1 and 1 or x)
+end
+
+local function easeOutCubic(t: number)
+	t = clamp01(t)
+	local k = 1 - t
+	return 1 - k * k * k
+end
+
 local function smoothPulse01(t: number, a: number, b: number)
-	local u = clamp01(t/a); u = u*u*(3-2*u)
-	local v = clamp01((1-t)/b); v = v*v*(3-2*v)
-	return u*v
+	local u = clamp01(t / a)
+	u = u * u * (3 - 2 * u)
+	local v = clamp01((1 - t) / b)
+	v = v * v * (3 - 2 * v)
+	return u * v
 end
 local function randUnitXZ()
 	local ang = rand(0, math.pi*2)
@@ -54,12 +103,16 @@ end
 local function setAnchored(inst: Instance, anchored: boolean)
 	if inst:IsA("BasePart") then
 		inst.Anchored = anchored
-		inst.CanCollide = false; inst.CanQuery = false; inst.CanTouch = false
+		inst.CanCollide = false
+		inst.CanQuery = false
+		inst.CanTouch = false
 	elseif inst:IsA("Model") then
 		for _, d in ipairs(inst:GetDescendants()) do
 			if d:IsA("BasePart") then
 				d.Anchored = anchored
-				d.CanCollide = false; d.CanQuery = false; d.CanTouch = false
+				d.CanCollide = false
+				d.CanQuery = false
+				d.CanTouch = false
 			end
 		end
 	end
@@ -76,8 +129,11 @@ local function getPivotCF(inst: Instance): CFrame
 end
 
 local function setCFrame(inst: Instance, cf: CFrame)
-	if inst:IsA("BasePart") then inst.CFrame = cf
-	elseif inst:IsA("Model") then inst:PivotTo(cf) end
+	if inst:IsA("BasePart") then
+		inst.CFrame = cf
+	elseif inst:IsA("Model") then
+		inst:PivotTo(cf)
+	end
 end
 
 local function setTransparency(inst: Instance, transparency: number)
@@ -177,7 +233,7 @@ function module:DropBeli(origin: Vector3 | CFrame, Amount)
 	end
 
 	task.spawn(function()
-		for i = 1, Amount or CFG.TokensPerBurst do
+		for _ = 1, Amount or CFG.TokensPerBurst do
 			task.spawn(function()
 				local d = template:Clone()
 				setAnchored(d, true)
@@ -191,12 +247,12 @@ function module:DropBeli(origin: Vector3 | CFrame, Amount)
 
 				local popStart = os.clock()
 				local popConn
-				popConn = RunService.RenderStepped:Connect(function()
+				popConn = scheduleRenderLoop("money-pop", function()
 					if not d or not d.Parent then
 						if popConn then
 							popConn:Disconnect()
 						end
-						return
+						return false
 					end
 					local t = (os.clock() - popStart)/CFG.PopTime
 					if t > 1 then
@@ -208,8 +264,9 @@ function module:DropBeli(origin: Vector3 | CFrame, Amount)
 					local rot = baseRot * CFrame.Angles(0, spin, 0)
 					setCFrame(d, CFrame.new(pos) * rot)
 					if t >= 1 then
-						popConn:Disconnect()
+						return false
 					end
+					return true
 				end)
 
 				task.wait(CFG.PopTime)
@@ -229,12 +286,12 @@ function module:DropBeli(origin: Vector3 | CFrame, Amount)
 				local hoverStartTime = os.clock()
 
 				local hoverConn
-				hoverConn = RunService.RenderStepped:Connect(function()
+				hoverConn = scheduleRenderLoop("money-hover", function()
 					if not d or not d.Parent then
 						if hoverConn then
 							hoverConn:Disconnect()
 						end
-						return
+						return false
 					end
 					local el = os.clock() - hoverStartTime
 					local t  = clamp01(el/hoverT)
@@ -250,8 +307,9 @@ function module:DropBeli(origin: Vector3 | CFrame, Amount)
 					local rot = baseRot * CFrame.Angles(wobble, spin, 0)
 					setCFrame(d, CFrame.new(pos) * rot)
 					if t >= 1 then
-						hoverConn:Disconnect()
+						return false
 					end
+					return true
 				end)
 
 				task.wait(hoverT)
@@ -302,20 +360,19 @@ function module:DropBeli(origin: Vector3 | CFrame, Amount)
 				local flyStartTime = os.clock()
 
 				local flyConn
-				flyConn = RunService.RenderStepped:Connect(function()
+				flyConn = scheduleRenderLoop("money-fly", function()
 					if not d or not d.Parent then
 						if flyConn then
 							flyConn:Disconnect()
 						end
-						return
+						return false
 					end
 
 					local headPos = getHeadPosition()
 					if not headPos then
 						setTransparency(d, 1)
-						flyConn:Disconnect()
 						d:Destroy()
-						return
+						return false
 					end
 
 					local charNow = player.Character
@@ -381,11 +438,12 @@ function module:DropBeli(origin: Vector3 | CFrame, Amount)
 					end
 
 					if dist <= CFG.HitDistance or t >= 1 then
-						flyConn:Disconnect()
 						playCollectHighlight()
 						playCollectSound()
 						d:Destroy()
+						return false
 					end
+					return true
 				end)
 
 				Debris:AddItem(d, 5)

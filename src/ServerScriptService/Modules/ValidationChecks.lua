@@ -87,7 +87,6 @@ function ValidationChecks.ValidateCoreDependencies()
 			Label = "ReplicatedStorage.Assets.One Piece Characters",
 			Path = { "Assets", "One Piece Characters" },
 		},
-		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.Rarities", Path = { "Rarities" } },
 		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.LuckyBlock", Path = { "LuckyBlock" } },
 		{ Root = ReplicatedFirst, Label = "ReplicatedFirst.Loading", Path = { "Loading" } },
 	}

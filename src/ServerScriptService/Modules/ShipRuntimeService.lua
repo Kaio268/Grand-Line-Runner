@@ -1138,6 +1138,9 @@ local function warnForRuntimePointMarker(activeShip, pointKey, pointConfig, mark
 	if preferredMarkerName == "" or markerName == preferredMarkerName or namesMatchIgnoringCase(markerName, preferredMarkerName) then
 		return
 	end
+	if pointKey == "GroupReward" or pointKey == "Home" then
+		return
+	end
 
 	local shipName = tostring(activeShip:GetAttribute(ATTR.ActiveModelName) or activeShip.Name)
 	local pointName = tostring(pointConfig.Name or pointKey)

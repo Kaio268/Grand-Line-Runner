@@ -15,6 +15,8 @@ local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild(
 local BiomeAreas = require(Configs:WaitForChild("BiomeAreas"))
 local SpawnPartsConfig = require(Configs:WaitForChild("SpawnParts"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
+local RuntimeScheduler = require(Modules:WaitForChild("RuntimeScheduler"))
+local PerformanceFlags = require(Modules:WaitForChild("Configs"):WaitForChild("PerformanceArchitectureFlags"))
 local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 
@@ -203,6 +205,8 @@ local PUDDLE_DENY_TAGS = {
 
 local rng = Random.new()
 local activeControllers = {}
+local scheduledPuddleLifetimes = {}
+local puddleLifetimeTaskHandle = nil
 local templateCacheByArea = {}
 local templateMetadataByTemplate = setmetatable({}, { __mode = "k" })
 local placementFailureCountsByArea = {}
@@ -1304,6 +1308,7 @@ local function setPuddleHitboxActive(controller, isActive)
 end
 
 local function unregisterController(controller)
+	scheduledPuddleLifetimes[controller] = nil
 	activeControllers[controller.Model] = nil
 	if controller.AffectableEntity then
 		AffectableRegistry.UnregisterEntity(controller.AffectableEntity)
@@ -1561,23 +1566,75 @@ local function applySlowToPlayersInside(controller)
 	end
 end
 
-local function waitActiveLifetime(controller)
-	local elapsed = 0
-	while elapsed < CONFIG.ActiveLifetime do
-		if controller.Destroyed or not controller.Model.Parent then
-			return false
-		end
-
-		if controller.FadingIn or os.clock() < controller.FrozenUntil then
-			task.wait(0.05)
-		else
-			local dt = RunService.Heartbeat:Wait()
-			elapsed += dt
-			applySlowToPlayersInside(controller)
-		end
+local function ensurePuddleLifetimeTask()
+	if puddleLifetimeTaskHandle and puddleLifetimeTaskHandle:IsConnected() then
+		return
 	end
 
-	return true
+	if not PerformanceFlags.IsEnabled("RuntimeSchedulerEnabled") or not PerformanceFlags.IsEnabled("HazardSchedulerEnabled") then
+		return
+	end
+
+	puddleLifetimeTaskHandle = RuntimeScheduler.GetDefault():Schedule({
+		Id = "Puddles.ActiveLifetimes",
+		Phase = "Heartbeat",
+		Priority = 12,
+		Callback = function(dt)
+			local hasActive = false
+			for controller in pairs(scheduledPuddleLifetimes) do
+				if controller.Destroyed or not controller.Model.Parent then
+					scheduledPuddleLifetimes[controller] = nil
+				else
+					hasActive = true
+					if not controller.FadingIn and os.clock() >= controller.FrozenUntil then
+						controller.ActiveLifetimeElapsed = (tonumber(controller.ActiveLifetimeElapsed) or 0) + dt
+						applySlowToPlayersInside(controller)
+						if controller.ActiveLifetimeElapsed >= CONFIG.ActiveLifetime then
+							scheduledPuddleLifetimes[controller] = nil
+							controller:Destroy()
+						end
+					end
+				end
+			end
+
+			if not hasActive then
+				return false
+			end
+			return true
+		end,
+		OnStop = function()
+			puddleLifetimeTaskHandle = nil
+		end,
+	})
+end
+
+local function scheduleActiveLifetime(controller)
+	controller.ActiveLifetimeElapsed = 0
+	scheduledPuddleLifetimes[controller] = true
+	if not PerformanceFlags.IsEnabled("RuntimeSchedulerEnabled") or not PerformanceFlags.IsEnabled("HazardSchedulerEnabled") then
+		task.spawn(function()
+			while controller.ActiveLifetimeElapsed < CONFIG.ActiveLifetime do
+				if controller.Destroyed or not controller.Model.Parent then
+					scheduledPuddleLifetimes[controller] = nil
+					return
+				end
+
+				if not controller.FadingIn and os.clock() >= controller.FrozenUntil then
+					local dt = task.wait()
+					controller.ActiveLifetimeElapsed += dt
+					applySlowToPlayersInside(controller)
+				else
+					task.wait(0.05)
+				end
+			end
+
+			scheduledPuddleLifetimes[controller] = nil
+			controller:Destroy()
+		end)
+		return
+	end
+
+	ensurePuddleLifetimeTask()
 end
 
 local function setPuddlePlacementAttributes(instance, placement, areaName, template)
@@ -1780,10 +1837,7 @@ local function spawnPuddle(
 
 	local controller = createController(model, hitbox, visualModel, placement.BiomeIndex, footprint, placement)
 	bindPuddleTouchedSlow(controller)
-	task.spawn(function()
-		waitActiveLifetime(controller)
-		controller:Destroy()
-	end)
+	scheduleActiveLifetime(controller)
 
 	trace(
 		"spawned biome=%d area=%s band=%d template=%s source=%s surfaceReason=%s part=%s surfaces=%d relativeScale=%.2f slow=%.2f perSurface=%d",

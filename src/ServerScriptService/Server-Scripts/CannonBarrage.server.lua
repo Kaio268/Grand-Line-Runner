@@ -1,7 +1,6 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
@@ -12,6 +11,8 @@ local BiomeAreas = require(Configs:WaitForChild("BiomeAreas"))
 local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild("HazardDebugConstants"))
 local GameSounds = require(Modules:WaitForChild("GameSounds"))
+local RuntimeScheduler = require(Modules:WaitForChild("RuntimeScheduler"))
+local PerformanceFlags = require(Modules:WaitForChild("Configs"):WaitForChild("PerformanceArchitectureFlags"))
 local HazardProtection = require(
 	ServerScriptService:WaitForChild("Modules")
 		:WaitForChild("DevilFruits")
@@ -149,6 +150,8 @@ local carriedGroundFilterCacheComplete = false
 local warningKeys = {}
 local activeBombCount = 0
 local activeBombCountByUserId = {}
+local activeBombStates = {}
+local bombFallTaskHandle = nil
 local rng = Random.new()
 
 local VFX_NAME_ALIASES = {
@@ -1203,6 +1206,85 @@ local function tryReserveActiveBombSlot(shot, circle)
 	return true
 end
 
+local function finishBombState(state)
+	if not state or state.Finished == true then
+		return
+	end
+
+	state.Finished = true
+	activeBombStates[state] = nil
+
+	if state.Bomb and state.Bomb.Parent then
+		state.Bomb:Destroy()
+	end
+
+	makeExplosion(state.Position, state.Shot)
+	damagePlayersAt(state.Position, state.Shot)
+	task.delay(math.max(0, tonumber(CONFIG.ImpactDebugLinger) or 0), function()
+		destroyImpactCircle(state.Circle)
+	end)
+	releaseActiveBombSlot(state.Shot and state.Shot.TargetUserId)
+
+	if state.FinishedEvent then
+		state.FinishedEvent:Fire()
+	end
+end
+
+local function stepBombState(state, dt)
+	if state.Finished == true then
+		return false
+	end
+
+	state.Elapsed += dt
+	local alpha = math.clamp(state.Elapsed / state.FallTime, 0, 1)
+	local easedAlpha = alpha * alpha
+	if state.Bomb and state.Bomb.Parent then
+		state.Bomb.CFrame = CFrame.new(state.StartPosition:Lerp(state.EndPosition, easedAlpha))
+	end
+
+	if alpha >= 1 or not (state.Bomb and state.Bomb.Parent) then
+		finishBombState(state)
+		return false
+	end
+
+	return true
+end
+
+local function ensureBombFallTask()
+	if bombFallTaskHandle and bombFallTaskHandle:IsConnected() then
+		return
+	end
+
+	if not PerformanceFlags.IsEnabled("RuntimeSchedulerEnabled") or not PerformanceFlags.IsEnabled("HazardSchedulerEnabled") then
+		return
+	end
+
+	bombFallTaskHandle = RuntimeScheduler.GetDefault():Schedule({
+		Id = "CannonBarrage.ActiveBombs",
+		Phase = "Heartbeat",
+		Priority = 14,
+		Callback = function(dt)
+			local hasActive = false
+			for state in pairs(activeBombStates) do
+				if state.Finished == true then
+					activeBombStates[state] = nil
+				else
+					hasActive = true
+					stepBombState(state, dt)
+				end
+			end
+
+			if not hasActive then
+				return false
+			end
+			return true
+		end,
+		OnStop = function()
+			bombFallTaskHandle = nil
+		end,
+	})
+end
+
 local function dropBombAt(position, shot, circle)
 	if not tryReserveActiveBombSlot(shot, circle) then
 		return
@@ -1212,27 +1294,36 @@ local function dropBombAt(position, shot, circle)
 	local endPosition = position + Vector3.new(0, CONFIG.BombSize / 2, 0)
 	local fallTime = math.max(0.05, tonumber(shot and shot.FallTime) or CONFIG.FallTime)
 	local bomb = makeBomb(startPosition, shot)
+	local finishedEvent = Instance.new("BindableEvent")
+	local state = {
+		Position = position,
+		Shot = shot,
+		Circle = circle,
+		StartPosition = startPosition,
+		EndPosition = endPosition,
+		FallTime = fallTime,
+		Bomb = bomb,
+		Elapsed = 0,
+		Finished = false,
+		FinishedEvent = finishedEvent,
+	}
 
-	local elapsed = 0
-	while elapsed < fallTime and bomb.Parent do
-		local dt = RunService.Heartbeat:Wait()
-		elapsed += dt
-
-		local alpha = math.clamp(elapsed / fallTime, 0, 1)
-		local easedAlpha = alpha * alpha
-		bomb.CFrame = CFrame.new(startPosition:Lerp(endPosition, easedAlpha))
+	if not PerformanceFlags.IsEnabled("RuntimeSchedulerEnabled") or not PerformanceFlags.IsEnabled("HazardSchedulerEnabled") then
+		while state.Elapsed < state.FallTime and state.Bomb.Parent do
+			local dt = task.wait()
+			stepBombState(state, dt)
+		end
+		if state.Finished ~= true then
+			finishBombState(state)
+		end
+		finishedEvent:Destroy()
+		return
 	end
 
-	if bomb.Parent then
-		bomb:Destroy()
-	end
-
-	makeExplosion(position, shot)
-	damagePlayersAt(position, shot)
-	task.delay(math.max(0, tonumber(CONFIG.ImpactDebugLinger) or 0), function()
-		destroyImpactCircle(circle)
-	end)
-	releaseActiveBombSlot(shot and shot.TargetUserId)
+	activeBombStates[state] = true
+	ensureBombFallTask()
+	finishedEvent.Event:Wait()
+	finishedEvent:Destroy()
 end
 
 local function buildShotContext(player, targetData, tuning, shotIndex, shotsPerCycle, bountyContext)
