@@ -4,6 +4,19 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local WipInstanceModalBridge = require(script.Parent:WaitForChild("WipInstanceModalBridge"))
+
+local wipUpgradeGui, ownsWipUpgrade = WipInstanceModalBridge.FindOwnedGui("UpgradeGui", 10)
+if wipUpgradeGui then
+	WipInstanceModalBridge.BindSpeedUpgradeTutorialRefs(wipUpgradeGui)
+elseif ownsWipUpgrade then
+	WipInstanceModalBridge.WatchGui("UpgradeGui", function(gui)
+		WipInstanceModalBridge.BindSpeedUpgradeTutorialRefs(gui)
+	end)
+end
+if ownsWipUpgrade then
+	return
+end
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -83,6 +96,19 @@ local function disconnectAll()
 		connection:Disconnect()
 	end
 	table.clear(connections)
+end
+
+local function shutdownReactFallback()
+	if destroyed then
+		return
+	end
+
+	destroyed = true
+	disconnectAll()
+	unregisterModal()
+	SpeedUpgradeTutorialBridge.ClearRefs()
+	modalAdapter:Destroy()
+	root:unmount()
 end
 
 local function getProductPrice(productId)
@@ -221,6 +247,14 @@ end
 modalAdapter:SetScheduleRender(scheduleRender)
 modalAdapter:BindFramesFolderTracking()
 
+local lateWipUpgradeConnection = WipInstanceModalBridge.WatchGui("UpgradeGui", function(gui)
+	shutdownReactFallback()
+	WipInstanceModalBridge.BindSpeedUpgradeTutorialRefs(gui)
+end)
+if lateWipUpgradeConnection then
+	connections[#connections + 1] = lateWipUpgradeConnection
+end
+
 connections[#connections + 1] = speedValue:GetPropertyChangedSignal("Value"):Connect(scheduleRender)
 connections[#connections + 1] = playerGui.ChildAdded:Connect(function(child)
 	modalAdapter:HandlePlayerGuiChildAdded(child)
@@ -231,10 +265,5 @@ end)
 render()
 
 script.Destroying:Connect(function()
-	destroyed = true
-	disconnectAll()
-	unregisterModal()
-	SpeedUpgradeTutorialBridge.ClearRefs()
-	modalAdapter:Destroy()
-	root:unmount()
+	shutdownReactFallback()
 end)

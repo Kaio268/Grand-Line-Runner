@@ -394,7 +394,7 @@ local function positionPreviewModel(previewModel, previewKind, previewName)
 		rotation = CREW_PREVIEW_ROTATION
 	elseif previewKind == "Chest" then
 		rotation = ChestVisuals.GetPreviewRotation(previewName)
-	elseif previewKind == "DevilFruit" and previewName == "Phoenix" then
+	elseif previewKind == "DevilFruit" and previewName == "Tori" then
 		rotation = CFrame.Angles(math.rad(-4), math.rad(24), 0)
 	end
 

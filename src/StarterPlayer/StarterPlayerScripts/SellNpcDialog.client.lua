@@ -40,11 +40,17 @@ if not prompt then
 	return
 end
 
-local function openCrewmateInventory()
+local function openNamiSell()
+	if ReactModalRegistry.Open("NamiShop", {
+		Source = "Nami",
+	}) then
+		return
+	end
+
 	ReactModalRegistry.Open("Inventory", {
 		ActiveCategory = "CrewMembers",
 		ActiveView = "Inventory",
-		Source = "Nami",
+		Source = "NamiFallback",
 	})
 end
 
@@ -53,5 +59,5 @@ prompt.Triggered:Connect(function(triggeringPlayer)
 		return
 	end
 
-	openCrewmateInventory()
+	openNamiSell()
 end)

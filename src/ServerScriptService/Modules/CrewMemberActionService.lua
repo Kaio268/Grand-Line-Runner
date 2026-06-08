@@ -25,6 +25,7 @@ local FINAL_MINUTE_LOCKED_ACTIONS = {
 	Equip = "equipping crewmates",
 	HoldEquipped = "holding crewmates",
 	Sell = "selling crewmates",
+	SellEquipped = "selling crewmates",
 	ToggleHoldEquipped = "holding crewmates",
 	Unequip = "unequipping crewmates",
 }
@@ -367,15 +368,15 @@ local function toggleHoldEquipped(player, payload)
 	)
 end
 
-local function sell(player, payload)
-	local instanceId = tostring(payload.InstanceId or payload.CrewMemberInstanceId or "")
+local function sellStoredInstance(player, instanceId, sourcePath, notifyReason, invalidStateReason)
+	instanceId = tostring(instanceId or "")
 	if instanceId == "" then
 		return result(false, "invalid_instance_id")
 	end
 
 	local state, _, instanceData = CrewInstanceService.GetInstanceState(player, instanceId)
 	if state ~= "Stored" then
-		return result(false, "sell_requires_stored", {
+		return result(false, invalidStateReason or "sell_requires_stored", {
 			State = state,
 		})
 	end
@@ -386,19 +387,56 @@ local function sell(player, payload)
 	end
 
 	local removedId, removedInstance, removeReason = CrewInstanceService.RemoveStoredInstanceById(player, instanceId, {
-		SourcePath = "crew_action_sell",
+		SourcePath = tostring(sourcePath or "crew_action_sell"),
 	})
 	if not removedInstance then
 		return result(false, tostring(removeReason or "sell_remove_failed"))
 	end
 
 	DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), price, { ApplyTitleBuff = false })
-	notifyChanged(player, "crew_sell")
+	notifyChanged(player, notifyReason or "crew_sell")
 	return result(true, "ok", {
 		Action = "Sell",
 		InstanceId = tostring(removedId),
 		Amount = price,
 	})
+end
+
+local function sell(player, payload)
+	local instanceId = tostring(payload.InstanceId or payload.CrewMemberInstanceId or "")
+	return sellStoredInstance(player, instanceId, "crew_action_sell", "crew_sell", "sell_requires_stored")
+end
+
+local function sellEquipped(player, payload)
+	local instanceId = tostring(payload.InstanceId or payload.CrewMemberInstanceId or "")
+	if instanceId == "" then
+		return result(false, "invalid_instance_id")
+	end
+
+	local state, resolvedInstanceId, instanceData = CrewInstanceService.GetInstanceState(player, instanceId)
+	if state ~= "Equipped" then
+		return result(false, "sell_requires_equipped", {
+			State = state,
+		})
+	end
+
+	local price = getSellPrice(instanceData)
+	if price <= 0 then
+		return result(false, "sell_price_unavailable")
+	end
+
+	local clearOk, clearResult = CrewQuickSlotService.ClearAssignmentsForInstance(player, resolvedInstanceId)
+	if clearOk ~= true then
+		return result(false, clearResult and clearResult.Reason or "quick_slot_clear_failed", clearResult)
+	end
+
+	return sellStoredInstance(
+		player,
+		resolvedInstanceId,
+		"crew_action_sell_equipped",
+		"crew_sell_equipped",
+		"sell_equipped_store_failed"
+	)
 end
 
 local function storeHeld(player, payload)
@@ -448,6 +486,8 @@ function CrewMemberActionService.HandleAction(player, payload)
 		return toggleHoldEquipped(player, payload)
 	elseif action == "Sell" then
 		return sell(player, payload)
+	elseif action == "SellEquipped" then
+		return sellEquipped(player, payload)
 	elseif action == "StoreHeld" then
 		return storeHeld(player, payload)
 	end

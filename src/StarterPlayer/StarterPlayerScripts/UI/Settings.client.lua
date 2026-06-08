@@ -41,6 +41,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	minSize = Vector2.new(760, 540),
 	maxSize = Vector2.new(1240, 760),
 	frameSize = SETTINGS_FRAME_SIZE,
+	useResponsiveUiScale = false,
 	createFrameIfMissing = true,
 	standalone = true,
 })

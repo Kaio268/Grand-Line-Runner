@@ -12,6 +12,7 @@ local SHELL = {
 	PanelBg = Color3.fromRGB(8, 8, 9),
 	GoldBase = Color3.fromRGB(228, 190, 78),
 	GoldHighlight = Color3.fromRGB(255, 224, 120),
+	GoldSoft = Color3.fromRGB(255, 244, 200),
 	GoldShadow = Color3.fromRGB(150, 112, 42),
 	Cream = Color3.fromRGB(255, 222, 130),
 	TextMain = Color3.fromRGB(235, 235, 235),
@@ -19,10 +20,13 @@ local SHELL = {
 	TextShadow = Color3.fromRGB(0, 0, 0),
 	Emerald = Color3.fromRGB(85, 255, 120),
 	CloseFill = Color3.fromRGB(200, 0, 9),
+	CloseFillSoft = Color3.fromRGB(235, 70, 78),
 	DailyTint = Color3.fromRGB(245, 245, 245),
 	WeeklyTint = Color3.fromRGB(176, 154, 255),
 	SpecialTint = Color3.fromRGB(255, 214, 112),
 	FinalTint = Color3.fromRGB(255, 122, 122),
+	GlowImage = "rbxassetid://114516018211032",
+	MapImage = "rbxassetid://120757950442747",
 }
 
 local BADGE_FONT = Font.new("rbxasset://fonts/families/SpecialElite.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
@@ -523,8 +527,8 @@ local function QuestScreen(props)
 			CornerRadius = UDim.new(0, 18),
 		}),
 		Anchor = e("ImageLabel", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundTransparency = 1,
+			AnchorPoint = Vector2.new(0.5, 0.5),
 			Image = "rbxassetid://87910431269362",
 			Position = UDim2.fromScale(0.949, 0.895),
 			ScaleType = Enum.ScaleType.Fit,
@@ -649,7 +653,7 @@ local function QuestScreen(props)
 			Gradient = e("UIGradient", {
 				Rotation = 90,
 				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 96, 102)),
+					ColorSequenceKeypoint.new(0, SHELL.CloseFillSoft),
 					ColorSequenceKeypoint.new(0.5, Color3.fromRGB(214, 24, 34)),
 					ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 0, 6)),
 				}),

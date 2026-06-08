@@ -19,9 +19,11 @@ local SIDE_MENU_MODAL_NAMES = {
 	Gifts = true,
 	Index = true,
 	Inventory = true,
+	NamiShop = true,
 	Quest = true,
 	Rebirth = true,
 	Settings = true,
+	SpeedUpgrade = true,
 	Store = true,
 }
 
@@ -104,13 +106,17 @@ end
 function ReactModalRegistry.Toggle(name, payload)
 	local key = tostring(name or "")
 	local entry = entries[key]
-	if entry and typeof(entry.toggle) == "function" then
-		if SIDE_MENU_MODAL_NAMES[key] == true and ReactModalRegistry.IsVisible(key) ~= true then
-			closeVisibleSideMenusExcept(key)
+	if entry then
+		if typeof(entry.toggle) == "function" then
+			if SIDE_MENU_MODAL_NAMES[key] == true and ReactModalRegistry.IsVisible(key) ~= true then
+				closeVisibleSideMenusExcept(key)
+			end
+			entry.toggle(payload)
+			fireChanged(key)
+			return true
 		end
-		entry.toggle(payload)
-		fireChanged(key)
-		return true
+
+		return SIDE_MENU_MODAL_NAMES[key] == true
 	end
 
 	if REACT_MODAL_NAMES[key] then
@@ -124,13 +130,17 @@ end
 function ReactModalRegistry.Open(name, payload)
 	local key = tostring(name or "")
 	local entry = entries[key]
-	if entry and typeof(entry.open) == "function" then
-		if SIDE_MENU_MODAL_NAMES[key] == true then
-			closeVisibleSideMenusExcept(key)
+	if entry then
+		if typeof(entry.open) == "function" then
+			if SIDE_MENU_MODAL_NAMES[key] == true then
+				closeVisibleSideMenusExcept(key)
+			end
+			entry.open(payload)
+			fireChanged(key)
+			return true
 		end
-		entry.open(payload)
-		fireChanged(key)
-		return true
+
+		return SIDE_MENU_MODAL_NAMES[key] == true
 	end
 
 	if REACT_MODAL_NAMES[key] then

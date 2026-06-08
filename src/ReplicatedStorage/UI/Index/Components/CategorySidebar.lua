@@ -85,6 +85,7 @@ local function CategorySidebar(props)
 	local sidebarChildren = {
 		List = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Vertical,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
 			Padding = UDim.new(0, 6),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),

@@ -140,6 +140,7 @@ function ReactFrameModalAdapter.new(options)
 	self.minSize = options.minSize
 	self.maxSize = options.maxSize
 	self.frameSize = options.frameSize
+	self.useResponsiveUiScale = options.useResponsiveUiScale ~= false
 	self.allowFallback = options.allowFallback == true
 	self.createFrameIfMissing = options.createFrameIfMissing == true
 	self.standalone = options.standalone == true
@@ -180,12 +181,20 @@ function ReactFrameModalAdapter:_getFrameConstraintScale()
 		return 1
 	end
 
+	if not self.useResponsiveUiScale then
+		return 1
+	end
+
 	return Responsive.getUiScale()
 end
 
 function ReactFrameModalAdapter:_getContentScale()
 	if self:_usesPhoneModalLayout() then
 		return MOBILE_CONTENT_SCALE
+	end
+
+	if not self.useResponsiveUiScale then
+		return 1
 	end
 
 	return self:_getFrameConstraintScale()

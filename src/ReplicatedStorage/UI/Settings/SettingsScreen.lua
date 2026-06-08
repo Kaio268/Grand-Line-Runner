@@ -9,17 +9,21 @@ local React = require(Packages:WaitForChild("React"))
 local e = React.createElement
 
 local THEME = {
+	GlowImage = "rbxassetid://114516018211032",
 	CardBg = Color3.fromRGB(8, 8, 9),
+	MenuOverlay = Color3.fromRGB(8, 8, 9),
 	HeaderBackground = Color3.fromRGB(14, 14, 16),
 	SectionBackground = Color3.fromRGB(14, 14, 16),
 	SectionHover = Color3.fromRGB(24, 24, 28),
 	GoldBase = Color3.fromRGB(228, 190, 78),
 	GoldHighlight = Color3.fromRGB(255, 224, 120),
 	GoldShadow = Color3.fromRGB(150, 112, 42),
+	Cream = Color3.fromRGB(255, 222, 130),
 	TextMain = Color3.fromRGB(235, 235, 235),
 	TextBright = Color3.fromRGB(247, 249, 255),
 	TextShadow = Color3.fromRGB(0, 0, 0),
 	CloseFill = Color3.fromRGB(200, 0, 9),
+	CloseFillSoft = Color3.fromRGB(235, 70, 78),
 	SwitchFill = Color3.fromRGB(20, 20, 24),
 }
 
@@ -795,7 +799,7 @@ local function SettingsScreen(props)
 			Gradient = e("UIGradient", {
 				Rotation = 90,
 				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 96, 102)),
+					ColorSequenceKeypoint.new(0, THEME.CloseFillSoft),
 					ColorSequenceKeypoint.new(0.5, Color3.fromRGB(214, 24, 34)),
 					ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 0, 6)),
 				}),

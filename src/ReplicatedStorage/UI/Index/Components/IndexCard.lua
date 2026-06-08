@@ -615,8 +615,6 @@ local function IndexCard(props)
 		or DEFAULT_CARD_BACKGROUND_TRANSPARENCY
 
 	if not unit.discovered then
-		local hiddenProduction = tostring(unit.hiddenProduction or "")
-
 		return baseCard({
 			backgroundTransparency = cardBackgroundTransparency,
 			layoutOrder = props.layoutOrder,
@@ -662,7 +660,6 @@ local function IndexCard(props)
 						MaxTextSize = 150,
 					}),
 				}),
-				Production = not isFruit and hiddenProduction ~= "" and productionBadge(hiddenProduction) or nil,
 			},
 		})
 	end

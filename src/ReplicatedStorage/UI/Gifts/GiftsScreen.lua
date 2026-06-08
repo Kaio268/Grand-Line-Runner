@@ -15,10 +15,13 @@ local SHELL = {
 	GoldBase = Color3.fromRGB(228, 190, 78),
 	GoldHighlight = Color3.fromRGB(255, 224, 120),
 	GoldShadow = Color3.fromRGB(150, 112, 42),
+	Cream = Color3.fromRGB(255, 222, 130),
 	TextMain = Color3.fromRGB(235, 235, 235),
 	TextMuted = Color3.fromRGB(184, 188, 196),
 	TextShadow = Color3.fromRGB(0, 0, 0),
 	CloseFill = Color3.fromRGB(200, 0, 9),
+	CloseFillSoft = Color3.fromRGB(235, 70, 78),
+	GlowImage = "rbxassetid://114516018211032",
 }
 
 local BADGE_FONT = Font.new("rbxasset://fonts/families/SpecialElite.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
@@ -231,7 +234,7 @@ local function GiftsScreen(props)
 			BackgroundTransparency = 0.12,
 			BorderSizePixel = 0,
 			Size = UDim2.fromScale(1, 1),
-			ZIndex = 1,
+			ZIndex = -2,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 18),

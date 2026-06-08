@@ -53,6 +53,7 @@ do
 end
 
 ClientRuntime.Formatters = require(script.Parent:WaitForChild("AppClientFormatters"))
+local NamiDirectSell = require(script.Parent:WaitForChild("NamiDirectSell"))
 
 function ClientRuntime.findOptionalChild(parent, childName, className)
 	if not parent then
@@ -4021,7 +4022,7 @@ end
 
 local function applyInventoryOpenPayload(payload)
 	if typeof(payload) ~= "table" then
-		return
+		return false
 	end
 
 	local requestedView = tostring(payload.ActiveView or payload.activeView or payload.View or payload.view or "")
@@ -4046,6 +4047,23 @@ local function applyInventoryOpenPayload(payload)
 			uiState.crewVariantFilter = "All"
 		end
 	end
+
+	if payload.DirectSell == true then
+		local mode = tostring(payload.NamiSellMode or payload.SellMode or payload.Source or "")
+		task.defer(function()
+			NamiDirectSell.Handle({
+				BuildRenderData = buildRenderData,
+				ClientRuntime = ClientRuntime,
+				CrewItemKind = CREW_ITEM_KIND,
+				IsCrewItemKind = isCrewItemKind,
+				PopUpModule = PopUpModule,
+				ScheduleRender = scheduleRender,
+			}, if mode:find("Hand", 1, true) then "Hand" else "Hotbar")
+		end)
+		return true
+	end
+
+	return false
 end
 
 ClientRuntime.UnregisterInventoryModal = ReactModalRegistry.Register("Inventory", {
@@ -4056,7 +4074,11 @@ ClientRuntime.UnregisterInventoryModal = ReactModalRegistry.Register("Inventory"
 		setInventoryOpen(not uiState.isOpen)
 	end,
 	open = function(payload)
-		applyInventoryOpenPayload(payload)
+		local directSellRequested = applyInventoryOpenPayload(payload)
+		if directSellRequested then
+			setInventoryOpen(false)
+			return
+		end
 		setInventoryOpen(true)
 	end,
 	close = function()

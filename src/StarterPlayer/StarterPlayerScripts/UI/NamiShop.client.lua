@@ -3,6 +3,19 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local WipInstanceModalBridge = require(script.Parent:WaitForChild("WipInstanceModalBridge"))
+
+local wipNamiSellGui, ownsWipNamiSell = WipInstanceModalBridge.FindOwnedGui("NamiSellGui", 10)
+if wipNamiSellGui then
+	WipInstanceModalBridge.BindNamiSellButtons(wipNamiSellGui)
+elseif ownsWipNamiSell then
+	WipInstanceModalBridge.WatchGui("NamiSellGui", function(gui)
+		WipInstanceModalBridge.BindNamiSellButtons(gui)
+	end)
+end
+if ownsWipNamiSell then
+	return
+end
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -68,6 +81,18 @@ local function disconnectAll()
 	table.clear(connections)
 end
 
+local function shutdownReactFallback()
+	if destroyed then
+		return
+	end
+
+	destroyed = true
+	disconnectAll()
+	unregisterModal()
+	modalAdapter:Destroy()
+	root:unmount()
+end
+
 local function openCrewmateInventory()
 	ReactModalRegistry.Close("NamiShop")
 	ReactModalRegistry.Open("Inventory", {
@@ -127,12 +152,16 @@ scheduleRender = function()
 	end)
 end
 
+local lateWipNamiConnection = WipInstanceModalBridge.WatchGui("NamiSellGui", function(gui)
+	shutdownReactFallback()
+	WipInstanceModalBridge.BindNamiSellButtons(gui)
+end)
+if lateWipNamiConnection then
+	connections[#connections + 1] = lateWipNamiConnection
+end
+
 render()
 
 script.Destroying:Connect(function()
-	destroyed = true
-	disconnectAll()
-	unregisterModal()
-	modalAdapter:Destroy()
-	root:unmount()
+	shutdownReactFallback()
 end)

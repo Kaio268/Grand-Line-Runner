@@ -37,6 +37,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	modalStateKey = "QuestModal",
 	minSize = Vector2.new(760, 520),
 	maxSize = Vector2.new(1080, 720),
+	useResponsiveUiScale = false,
 	createFrameIfMissing = true,
 	standalone = true,
 })
@@ -218,7 +219,7 @@ local function prepareQuestFrame()
 	frame.BackgroundTransparency = 1
 	frame.BorderSizePixel = 0
 	frame.ClipsDescendants = false
-	frame.Size = UDim2.fromScale(0.86, 0.8)
+	frame.Size = UDim2.fromScale(0.76, 0.72)
 	frame.ZIndex = 120
 	if host then
 		host.ZIndex = 140

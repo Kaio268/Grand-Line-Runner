@@ -3,6 +3,19 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local WipInstanceModalBridge = require(script.Parent:WaitForChild("WipInstanceModalBridge"))
+
+local _, ownsWipShop = WipInstanceModalBridge.BindOwnedModal({
+	guiName = "RobuxShopGui",
+	modalName = "Store",
+	timeoutSeconds = 10,
+	allowToggle = true,
+	consumeRecentExternalToggle = true,
+	reconcileToggle = true,
+})
+if ownsWipShop then
+	return
+end
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -208,6 +221,19 @@ local function disconnectAll()
 	table.clear(cleanupConnections)
 end
 
+local function shutdownReactFallback()
+	if destroyed then
+		return
+	end
+
+	destroyed = true
+	disconnectAll()
+	unregisterModal()
+	purchaseAdapter:destroy()
+	modalAdapter:Destroy()
+	root:unmount()
+end
+
 local function hideLegacyStoreContents()
 	local storeFrame = modalAdapter:GetFrame()
 	local shopHost = storeFrame and storeFrame:FindFirstChild("ReactStoreHost")
@@ -343,6 +369,19 @@ purchaseAdapter:primeCatalog(Catalog)
 table.insert(cleanupConnections, purchaseAdapter:subscribe(scheduleRender))
 modalAdapter:SetScheduleRender(scheduleRender)
 modalAdapter:BindFramesFolderTracking()
+local lateWipShopConnection = WipInstanceModalBridge.WatchGui("RobuxShopGui", function(gui)
+	WipInstanceModalBridge.BindModal({
+		gui = gui,
+		modalName = "Store",
+		allowToggle = true,
+		consumeRecentExternalToggle = true,
+		reconcileToggle = true,
+	})
+	shutdownReactFallback()
+end)
+if lateWipShopConnection then
+	table.insert(cleanupConnections, lateWipShopConnection)
+end
 table.insert(cleanupConnections, playerGui.ChildAdded:Connect(function(child)
 	if child.Name == "Frames" or child.Name == "OpenUI" then
 		modalAdapter:HandlePlayerGuiChildAdded(child)
@@ -357,10 +396,5 @@ end))
 render()
 
 script.Destroying:Connect(function()
-	destroyed = true
-	disconnectAll()
-	unregisterModal()
-	purchaseAdapter:destroy()
-	modalAdapter:Destroy()
-	root:unmount()
+	shutdownReactFallback()
 end)

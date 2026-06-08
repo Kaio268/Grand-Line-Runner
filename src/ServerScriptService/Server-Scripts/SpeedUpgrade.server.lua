@@ -220,8 +220,10 @@ local function handleSpeedUpgrade(player, upgradeName)
 end
 
 remote.OnServerEvent:Connect(function(player, upgradeName)
+	local normalizedUpgradeName = tostring(upgradeName or "")
+
 	-- Security: shared guard and local lock stop malformed/spammed upgrade requests before currency mutation.
-	if not RemoteGuard.Check(player, "BuySpeedUpgrade", { upgradeName }, {
+	if not RemoteGuard.Check(player, "BuySpeedUpgrade", { normalizedUpgradeName }, {
 		Cooldown = 0.2,
 		Args = {
 			{ Type = "string", MaxLength = 8 },
@@ -235,7 +237,7 @@ remote.OnServerEvent:Connect(function(player, upgradeName)
 	end
 	purchaseLocks[player] = true
 
-	local ok, err = pcall(handleSpeedUpgrade, player, upgradeName)
+	local ok, err = pcall(handleSpeedUpgrade, player, normalizedUpgradeName)
 	purchaseLocks[player] = nil
 	if not ok then
 		warn(string.format("[BuySpeedUpgrade] failed player=%s error=%s", player.Name, tostring(err)))

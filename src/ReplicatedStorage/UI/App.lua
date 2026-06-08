@@ -441,7 +441,7 @@ local function positionPreviewModel(previewModel, previewKind, previewName)
 		rotation = CFrame.Angles(math.rad(-14), math.rad(-26), 0)
 	elseif previewKind == "CrewMember" then
 		rotation = CREW_PREVIEW_ROTATION
-	elseif previewKind == "DevilFruit" and previewName == "Phoenix" then
+	elseif previewKind == "DevilFruit" and previewName == "Tori" then
 		rotation = CFrame.Angles(math.rad(-4), math.rad(24), 0)
 	end
 

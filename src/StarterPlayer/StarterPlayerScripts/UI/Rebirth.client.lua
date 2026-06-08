@@ -3,6 +3,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local WipInstanceModalBridge = require(script.Parent:WaitForChild("WipInstanceModalBridge"))
+
+local _, ownsWipRebirth = WipInstanceModalBridge.FindOwnedGui("RebirthGui", 10)
+if ownsWipRebirth then
+	return
+end
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -80,6 +86,18 @@ local function disconnectAll()
 		connection:Disconnect()
 	end
 	table.clear(connections)
+end
+
+local function shutdownReactFallback()
+	if destroyed then
+		return
+	end
+
+	destroyed = true
+	disconnectAll()
+	unregisterModal()
+	modalAdapter:Destroy()
+	root:unmount()
 end
 
 local function formatRewardAmount(amount)
@@ -192,13 +210,15 @@ end
 connections[#connections + 1] = rebirthsValue:GetPropertyChangedSignal("Value"):Connect(scheduleRender)
 connections[#connections + 1] = moneyValue:GetPropertyChangedSignal("Value"):Connect(scheduleRender)
 connections[#connections + 1] = shipLevelValue:GetPropertyChangedSignal("Value"):Connect(scheduleRender)
+local lateWipRebirthConnection = WipInstanceModalBridge.WatchGui("RebirthGui", function()
+	shutdownReactFallback()
+end)
+if lateWipRebirthConnection then
+	connections[#connections + 1] = lateWipRebirthConnection
+end
 
 render()
 
 script.Destroying:Connect(function()
-	destroyed = true
-	disconnectAll()
-	unregisterModal()
-	modalAdapter:Destroy()
-	root:unmount()
+	shutdownReactFallback()
 end)
