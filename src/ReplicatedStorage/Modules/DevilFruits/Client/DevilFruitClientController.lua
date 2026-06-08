@@ -606,7 +606,14 @@ local function isCompactHud()
 end
 
 local function getHudLayoutMode()
-	return Responsive.getHudLayoutMode()
+	local viewport = Responsive.getViewportSize()
+	local mode = Responsive.getHudLayoutMode(viewport)
+	local viewportMode = Responsive.getViewportLayoutMode(viewport)
+	if UserInputService.TouchEnabled and (viewportMode == "phone" or viewportMode == "tablet") then
+		return viewportMode
+	end
+
+	return mode
 end
 
 local function hasKeyboardInput()

@@ -629,7 +629,7 @@ function UIController:_cacheButtons()
 		end
 
 		table.insert(self.Buttons, btn)
-		self._buttonConnections[btn] = btn.MouseButton1Click:Connect(function()
+		self._buttonConnections[btn] = btn.Activated:Connect(function()
 			if not self:_isActiveController() or self.ActiveErrorFrame or self.IsAnimating then
 				return
 			end

@@ -29,17 +29,17 @@ local LEFT_MENU = {
 	},
 	tablet = {
 		orientation = "horizontal",
-		tileSize = 132,
-		iconSize = 120,
-		textSize = 24,
-		gap = 16,
+		tileSize = 88,
+		iconSize = 72,
+		textSize = 13,
+		gap = 8,
 		columns = 3,
 		rows = 2,
-		position = UDim2.fromOffset(8, 196),
-		badgeSize = UDim2.fromOffset(60, 34),
-		newBadgeSize = UDim2.fromOffset(76, 36),
-		timerSize = UDim2.fromOffset(96, 26),
-		timerTextSize = 16,
+		position = UDim2.fromOffset(12, 124),
+		badgeSize = UDim2.fromOffset(46, 26),
+		newBadgeSize = UDim2.fromOffset(58, 26),
+		timerSize = UDim2.fromOffset(70, 20),
+		timerTextSize = 12,
 		titleYScale = 0.75,
 	},
 	compactDesktop = {
@@ -191,7 +191,7 @@ HudLayout.TopBanner = {
 
 HudLayout.BoostTimer = {
 	phone = {
-		position = UDim2.new(1, -12, 0, 118),
+		position = UDim2.new(1, -12, 0, 146),
 		size = UDim2.fromOffset(300, 120),
 		compact = true,
 	},
@@ -210,6 +210,18 @@ HudLayout.BoostTimer = {
 		size = UDim2.fromOffset(360, 140),
 		compact = false,
 	},
+}
+
+local MOBILE_RIGHT_STACK = {
+	rightInset = 12,
+	gap = 6,
+	minTop = 8,
+	preferredTop = 96,
+	bottomInset = 12,
+	adminSize = Vector2.new(132, 40),
+	boostSize = Vector2.new(300, 118),
+	boostCollapsedHeight = 34,
+	devilFruitReservedHeight = 190,
 }
 
 HudLayout.InventoryToggle = {
@@ -388,8 +400,67 @@ local function applyLeftMenuScale(layout, scale)
 	layout.uiScale = scale
 end
 
+local function shouldUseMobileRightStack(mode, viewport)
+	local size = viewport or Responsive.getViewportSize()
+	local resolvedMode = tostring(mode or Responsive.getHudLayoutMode(size))
+	return resolvedMode == "phone" or Responsive.isPhoneViewport(size)
+end
+
+local function makeRightStackEntry(viewport, top, size)
+	local width = roundOffset(size.X)
+	local height = roundOffset(size.Y)
+	local rightInset = MOBILE_RIGHT_STACK.rightInset
+
+	return {
+		anchorPoint = Vector2.new(1, 0),
+		position = UDim2.new(1, -rightInset, 0, top),
+		size = UDim2.fromOffset(width, height),
+		rect = {
+			x = viewport.X - rightInset - width,
+			y = top,
+			width = width,
+			height = height,
+		},
+	}
+end
+
 function HudLayout.getMode(viewport)
 	return Responsive.getHudLayoutMode(viewport)
+end
+
+function HudLayout.getMobileRightStack(mode, options)
+	local viewport = Responsive.getViewportSize()
+	if not shouldUseMobileRightStack(mode, viewport) then
+		return nil
+	end
+
+	local config = MOBILE_RIGHT_STACK
+	local adminHeight = roundOffset(config.adminSize.Y)
+	local boostHeight = roundOffset(config.boostSize.Y)
+	local fruitHeight =
+		math.max(roundOffset(tonumber(options and options.devilFruitHeight) or 0), config.devilFruitReservedHeight)
+	local gap = roundOffset(config.gap)
+	local totalHeight = adminHeight + gap + boostHeight + gap + fruitHeight
+	local bottomAlignedTop = viewport.Y - totalHeight - config.bottomInset
+	local stackTop = math.clamp(bottomAlignedTop, config.minTop, config.preferredTop)
+	local adminTop = stackTop
+	local boostTop = adminTop + adminHeight + gap
+	local devilFruitTop = boostTop + boostHeight + gap
+	local admin = makeRightStackEntry(viewport, adminTop, config.adminSize)
+	local boost = makeRightStackEntry(viewport, boostTop, config.boostSize)
+	local devilFruit = makeRightStackEntry(viewport, devilFruitTop, Vector2.new(HudLayout.DevilFruit.phone.width, fruitHeight))
+
+	boost.collapsedHeight = roundOffset(config.boostCollapsedHeight)
+	boost.gap = gap
+	devilFruit.position = UDim2.new(1, -config.rightInset, 0, devilFruitTop)
+
+	return {
+		gap = gap,
+		rightInset = config.rightInset,
+		admin = admin,
+		boost = boost,
+		devilFruit = devilFruit,
+	}
 end
 
 function HudLayout.getLeftMenu(mode)
@@ -482,7 +553,15 @@ function HudLayout.getBoostTimer(mode)
 		resolvedMode = "phone"
 	end
 
-	return getByMode(HudLayout.BoostTimer, resolvedMode)
+	local layout = getByMode(HudLayout.BoostTimer, resolvedMode)
+	local stack = HudLayout.getMobileRightStack(resolvedMode)
+	if stack then
+		layout.position = stack.boost.position
+		layout.size = stack.boost.size
+		layout.collapsedHeight = stack.boost.collapsedHeight
+		layout.stackGap = stack.gap
+	end
+	return layout
 end
 
 function HudLayout.getInventoryToggle(mode)

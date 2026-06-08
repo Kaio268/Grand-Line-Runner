@@ -5,7 +5,23 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local WipInstanceModalBridge = require(script.Parent:WaitForChild("WipInstanceModalBridge"))
 
-local _, ownsWipRebirth = WipInstanceModalBridge.FindOwnedGui("RebirthGui", 10)
+local function bindWipRebirthGui(gui)
+	WipInstanceModalBridge.BindResponsiveModal(gui, {
+		rootName = "Card",
+		displayOrder = 200,
+		margin = 24,
+		designSize = Vector2.new(560, 490),
+	})
+end
+
+local wipRebirthGui, ownsWipRebirth = WipInstanceModalBridge.FindOwnedGui("RebirthGui", 10)
+if wipRebirthGui then
+	bindWipRebirthGui(wipRebirthGui)
+elseif ownsWipRebirth then
+	WipInstanceModalBridge.WatchGui("RebirthGui", function(gui)
+		bindWipRebirthGui(gui)
+	end)
+end
 if ownsWipRebirth then
 	return
 end

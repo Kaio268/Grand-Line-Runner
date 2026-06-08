@@ -6,6 +6,7 @@ local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
+local HudLayout = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("HudLayout"))
 
 local WARNING_THROTTLE_SECONDS = 5
 local warningTimes = {}
@@ -3244,9 +3245,54 @@ local function toggleDashboard()
 end
 
 local adminLauncherGui = nil
+local adminLauncherButton = nil
+local adminLauncherViewportConnections = {}
+
+local function applyAdminLauncherLayout()
+	if not adminLauncherButton then
+		return
+	end
+
+	local stack = HudLayout.getMobileRightStack(Responsive.getHudLayoutMode())
+	if stack then
+		adminLauncherButton.AnchorPoint = stack.admin.anchorPoint
+		adminLauncherButton.Position = stack.admin.position
+		adminLauncherButton.Size = stack.admin.size
+		return
+	end
+
+	adminLauncherButton.AnchorPoint = Vector2.new(1, 0)
+	adminLauncherButton.Position = UDim2.new(1, -16, 0, 96)
+	adminLauncherButton.Size = UDim2.fromOffset(132, 40)
+end
+
+local function disconnectAdminLauncherViewportConnections()
+	for _, connection in ipairs(adminLauncherViewportConnections) do
+		connection:Disconnect()
+	end
+	table.clear(adminLauncherViewportConnections)
+end
+
+local function bindAdminLauncherViewportUpdates()
+	disconnectAdminLauncherViewportConnections()
+
+	local camera = workspace.CurrentCamera
+	if camera then
+		adminLauncherViewportConnections[#adminLauncherViewportConnections + 1] =
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyAdminLauncherLayout)
+	end
+
+	adminLauncherViewportConnections[#adminLauncherViewportConnections + 1] =
+		workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+			bindAdminLauncherViewportUpdates()
+			applyAdminLauncherLayout()
+		end)
+end
+
 updateAdminLauncherVisibility = function()
 	if adminLauncherGui then
 		adminLauncherGui.Enabled = isAdmin == true and dashboardGui ~= nil
+		applyAdminLauncherLayout()
 	end
 end
 
@@ -3287,6 +3333,10 @@ local function createAdminLauncher()
 	})
 	addCorner(button, 12)
 	addStroke(button, COLORS.Gold, 1, 0.18)
+
+	adminLauncherButton = button
+	applyAdminLauncherLayout()
+	bindAdminLauncherViewportUpdates()
 
 	button.Activated:Connect(toggleDashboard)
 end

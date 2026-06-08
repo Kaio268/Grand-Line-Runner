@@ -12,6 +12,26 @@ local _, ownsWipShop = WipInstanceModalBridge.BindOwnedModal({
 	allowToggle = true,
 	consumeRecentExternalToggle = true,
 	reconcileToggle = true,
+	onBound = function(gui)
+		WipInstanceModalBridge.BindResponsiveModal(gui, {
+			rootName = "ShopCard",
+			displayOrder = 200,
+			margin = 24,
+			designSize = Vector2.new(1728, 972),
+		})
+		WipInstanceModalBridge.BindStoreReferenceGrid(gui, {
+			rootName = "ShopCard",
+			contentName = "Content",
+			referenceContentWidth = 1688,
+			columns = 3,
+			fallbackColumns = 2,
+			padding = 14,
+			usableInset = 22,
+			minPhysicalCellWidth = 128,
+			designSize = Vector2.new(1728, 972),
+			margin = 24,
+		})
+	end,
 })
 if ownsWipShop then
 	return

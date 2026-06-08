@@ -6,12 +6,22 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local WipInstanceModalBridge = require(script.Parent:WaitForChild("WipInstanceModalBridge"))
 
+local function bindWipUpgradeGui(gui)
+	WipInstanceModalBridge.BindResponsiveModal(gui, {
+		rootName = "Card",
+		displayOrder = 200,
+		margin = 24,
+		designSize = Vector2.new(580, 330),
+	})
+	WipInstanceModalBridge.BindSpeedUpgradeTutorialRefs(gui)
+end
+
 local wipUpgradeGui, ownsWipUpgrade = WipInstanceModalBridge.FindOwnedGui("UpgradeGui", 10)
 if wipUpgradeGui then
-	WipInstanceModalBridge.BindSpeedUpgradeTutorialRefs(wipUpgradeGui)
+	bindWipUpgradeGui(wipUpgradeGui)
 elseif ownsWipUpgrade then
 	WipInstanceModalBridge.WatchGui("UpgradeGui", function(gui)
-		WipInstanceModalBridge.BindSpeedUpgradeTutorialRefs(gui)
+		bindWipUpgradeGui(gui)
 	end)
 end
 if ownsWipUpgrade then

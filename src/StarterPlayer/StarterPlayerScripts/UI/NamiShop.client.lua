@@ -5,12 +5,19 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local WipInstanceModalBridge = require(script.Parent:WaitForChild("WipInstanceModalBridge"))
 
+local function bindWipNamiSellGui(gui)
+	WipInstanceModalBridge.BindResponsiveModal(gui, {
+		displayOrder = 200,
+	})
+	WipInstanceModalBridge.BindNamiSellButtons(gui)
+end
+
 local wipNamiSellGui, ownsWipNamiSell = WipInstanceModalBridge.FindOwnedGui("NamiSellGui", 10)
 if wipNamiSellGui then
-	WipInstanceModalBridge.BindNamiSellButtons(wipNamiSellGui)
+	bindWipNamiSellGui(wipNamiSellGui)
 elseif ownsWipNamiSell then
 	WipInstanceModalBridge.WatchGui("NamiSellGui", function(gui)
-		WipInstanceModalBridge.BindNamiSellButtons(gui)
+		bindWipNamiSellGui(gui)
 	end)
 end
 if ownsWipNamiSell then

@@ -271,14 +271,23 @@ local function CooldownHud(props)
 		then listInset + (#(props.abilities or {}) * rowHeight) + ((#(props.abilities or {}) - 1) * rowGap)
 		else (compact and 24 or 44)
 	local totalHeight = outerInset + topBarHeight + gap + listHeight + outerInset
+	local anchorPoint = layout.anchorPoint or Vector2.new(1, 1)
+	local position = layout.position
+	local stack = HudLayout.getMobileRightStack(props.layoutMode, {
+		devilFruitHeight = totalHeight,
+	})
+	if stack then
+		anchorPoint = stack.devilFruit.anchorPoint
+		position = stack.devilFruit.position
+	end
 
 	return e("Frame", {
-		AnchorPoint = Vector2.new(1, 1),
+		AnchorPoint = anchorPoint,
 		BackgroundColor3 = THEME.PrimaryBg,
 		BackgroundTransparency = 0.03,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
-		Position = layout.position,
+		Position = position,
 		Size = UDim2.fromOffset(layout.width, totalHeight),
 		ZIndex = 30,
 	}, {

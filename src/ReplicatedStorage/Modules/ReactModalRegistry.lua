@@ -1,6 +1,7 @@
 local ReactModalRegistry = {}
 
 local entries = {}
+local entryPriorities = {}
 local pendingOperations = {}
 local changedEvent = Instance.new("BindableEvent")
 local REACT_MODAL_NAMES = {
@@ -60,13 +61,24 @@ local function closeVisibleSideMenusExcept(exceptName)
 	end
 end
 
-function ReactModalRegistry.Register(name, handlers)
+function ReactModalRegistry.Register(name, handlers, options)
 	local key = tostring(name or "")
 	if key == "" or typeof(handlers) ~= "table" then
 		return function() end
 	end
 
+	local priority = 0
+	if typeof(options) == "table" then
+		priority = tonumber(options.priority) or 0
+	end
+
+	local existingPriority = entryPriorities[key] or 0
+	if entries[key] ~= nil and existingPriority > priority then
+		return function() end
+	end
+
 	entries[key] = handlers
+	entryPriorities[key] = priority
 	fireChanged(key)
 
 	local pendingOperation = pendingOperations[key]
@@ -90,6 +102,7 @@ function ReactModalRegistry.Register(name, handlers)
 	return function()
 		if entries[key] == handlers then
 			entries[key] = nil
+			entryPriorities[key] = nil
 			fireChanged(key)
 		end
 	end

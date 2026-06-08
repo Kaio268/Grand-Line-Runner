@@ -1,21 +1,30 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
 local NamiSellValueUpdater = require(script.Parent:WaitForChild("NamiSellValueUpdater"))
 
 local WipInstanceModalBridge = {}
 
 local boundModalGuis = setmetatable({}, { __mode = "k" })
+local boundResponsiveGuis = setmetatable({}, { __mode = "k" })
+local boundStoreReferenceGridGuis = setmetatable({}, { __mode = "k" })
 local boundSellGuis = setmetatable({}, { __mode = "k" })
 local boundSpeedTutorialGuis = setmetatable({}, { __mode = "k" })
 local pendingOwnedGuiBinds = {}
 local pendingWatchers = {}
 local RECENT_TOGGLE_WINDOW_SECONDS = 0.12
+local WIP_MODAL_REGISTRY_PRIORITY = 100
+local RESPONSIVE_SCALE_NAME = "WipResponsiveFitScale"
+local DEFAULT_RESPONSIVE_MARGIN = 24
+local REFERENCE_DESIGN_VIEWPORT = Vector2.new(1920, 1080)
 
 local DEFAULT_EXCLUSIVE_MODALS = {
 	"Gifts",
@@ -58,6 +67,362 @@ local function connectButton(button, callback)
 	end
 
 	return button.Activated:Connect(callback)
+end
+
+local function getViewportSize()
+	local camera = Workspace.CurrentCamera
+	return camera and camera.ViewportSize or Vector2.new(1280, 720)
+end
+
+local function resolveDesignSize(root, options)
+	local requestedSize = options and options.designSize
+	if typeof(requestedSize) == "Vector2" then
+		return requestedSize
+	end
+
+	local size = root.Size
+	local width = (size.X.Scale * REFERENCE_DESIGN_VIEWPORT.X) + size.X.Offset
+	local height = (size.Y.Scale * REFERENCE_DESIGN_VIEWPORT.Y) + size.Y.Offset
+	local constraint = root:FindFirstChildOfClass("UISizeConstraint")
+
+	if constraint then
+		width = math.clamp(width, constraint.MinSize.X, constraint.MaxSize.X)
+		height = math.clamp(height, constraint.MinSize.Y, constraint.MaxSize.Y)
+	end
+
+	return Vector2.new(math.max(width, 1), math.max(height, 1))
+end
+
+local function getOrCreateResponsiveScale(root)
+	local scale = root:FindFirstChild(RESPONSIVE_SCALE_NAME)
+	if scale and scale:IsA("UIScale") then
+		return scale
+	end
+
+	scale = Instance.new("UIScale")
+	scale.Name = RESPONSIVE_SCALE_NAME
+	scale.Scale = 1
+	scale.Parent = root
+	return scale
+end
+
+local function computeResponsiveScale(root, options)
+	local viewportSize = getViewportSize()
+	local margin = tonumber(options and options.margin) or DEFAULT_RESPONSIVE_MARGIN
+	local availableWidth = math.max(1, viewportSize.X - (margin * 2))
+	local availableHeight = math.max(1, viewportSize.Y - (margin * 2))
+	local baseSize = resolveDesignSize(root, options)
+	local scale = math.min(availableWidth / baseSize.X, availableHeight / baseSize.Y, 1)
+	local phoneScaleMultiplier = tonumber(options and options.phoneScaleMultiplier) or 1
+	if phoneScaleMultiplier > 0 then
+		scale = math.min(scale * phoneScaleMultiplier, 1)
+	end
+
+	return math.clamp(scale, 0.1, 1)
+end
+
+local function applyPhoneConstraintLayout(root, originalLayout, designSize)
+	local constraint = originalLayout and originalLayout.Constraint
+	if constraint and constraint.Parent then
+		constraint.MinSize = originalLayout.ConstraintMinSize
+		constraint.MaxSize = Vector2.new(
+			math.max(originalLayout.ConstraintMaxSize.X, designSize.X),
+			math.max(originalLayout.ConstraintMaxSize.Y, designSize.Y)
+		)
+	end
+
+	root.AnchorPoint = Vector2.new(0.5, 0.5)
+	root.Position = UDim2.fromScale(0.5, 0.5)
+	root.Size = UDim2.fromOffset(designSize.X, designSize.Y)
+end
+
+local function restoreOriginalLayout(root, originalLayout)
+	if originalLayout then
+		local constraint = originalLayout.Constraint
+		if constraint and constraint.Parent then
+			constraint.MinSize = originalLayout.ConstraintMinSize
+			constraint.MaxSize = originalLayout.ConstraintMaxSize
+		end
+
+		root.AnchorPoint = originalLayout.AnchorPoint
+		root.Position = originalLayout.Position
+		root.Size = originalLayout.Size
+	end
+end
+
+local function isPhoneViewport()
+	return Responsive.isPhoneViewport(getViewportSize())
+end
+
+function WipInstanceModalBridge.BindResponsiveModal(gui, options)
+	if not isScreenGui(gui) then
+		return gui
+	end
+
+	local existing = boundResponsiveGuis[gui]
+	if existing then
+		existing.update()
+		return gui
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	local displayOrder = tonumber(options.displayOrder)
+	local rootName = tostring(options.rootName or "")
+	local root = nil
+	local fitScale = nil
+	local originalRootLayout = nil
+
+	if rootName ~= "" then
+		local candidate = gui:FindFirstChild(rootName)
+		if candidate and candidate:IsA("GuiObject") then
+			root = candidate
+			fitScale = getOrCreateResponsiveScale(root)
+			local constraint = root:FindFirstChildOfClass("UISizeConstraint")
+			originalRootLayout = {
+				AnchorPoint = root.AnchorPoint,
+				Position = root.Position,
+				Size = root.Size,
+				Constraint = constraint,
+				ConstraintMinSize = constraint and constraint.MinSize or nil,
+				ConstraintMaxSize = constraint and constraint.MaxSize or nil,
+			}
+		end
+	end
+
+	local cameraConnection = nil
+	local connections = {}
+	local function track(connection)
+		table.insert(connections, connection)
+		return connection
+	end
+
+	local function update()
+		if displayOrder then
+			gui.DisplayOrder = displayOrder
+		end
+
+		if root and root.Parent and fitScale then
+			if isPhoneViewport() then
+				local designSize = resolveDesignSize(root, options)
+				applyPhoneConstraintLayout(root, originalRootLayout, designSize)
+				fitScale.Scale = computeResponsiveScale(root, options)
+			else
+				restoreOriginalLayout(root, originalRootLayout)
+				fitScale.Scale = 1
+			end
+		end
+	end
+
+	local function bindCamera()
+		if cameraConnection then
+			cameraConnection:Disconnect()
+			cameraConnection = nil
+		end
+
+		local camera = Workspace.CurrentCamera
+		if camera then
+			cameraConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(update)
+		end
+	end
+
+	bindCamera()
+	track(gui:GetPropertyChangedSignal("Enabled"):Connect(update))
+	track(Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		bindCamera()
+		update()
+	end))
+
+	boundResponsiveGuis[gui] = {
+		update = update,
+	}
+
+	gui.Destroying:Connect(function()
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		if cameraConnection then
+			cameraConnection:Disconnect()
+			cameraConnection = nil
+		end
+		boundResponsiveGuis[gui] = nil
+	end)
+
+	task.defer(update)
+
+	return gui
+end
+
+function WipInstanceModalBridge.BindStoreReferenceGrid(gui, options)
+	if not isScreenGui(gui) then
+		return gui
+	end
+
+	local existing = boundStoreReferenceGridGuis[gui]
+	if existing then
+		existing.update()
+		return gui
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	local rootName = tostring(options.rootName or "ShopCard")
+	local contentName = tostring(options.contentName or "Content")
+	local root = gui:FindFirstChild(rootName)
+	local content = root and root:FindFirstChild(contentName)
+	if not (content and content:IsA("GuiObject")) then
+		return gui
+	end
+
+	local referenceContentWidth = tonumber(options.referenceContentWidth) or 1688
+	local preferredColumns = math.max(1, math.floor(tonumber(options.columns) or 3))
+	local fallbackColumns = math.max(1, math.floor(tonumber(options.fallbackColumns) or math.max(1, preferredColumns - 1)))
+	local padPx = math.max(0, math.floor(tonumber(options.padding) or 14))
+	local usableInset = math.max(0, tonumber(options.usableInset) or 22)
+	local minCellWidth = math.max(1, math.floor(tonumber(options.minCellWidth) or 150))
+	local minPhysicalCellWidth = math.max(1, math.floor(tonumber(options.minPhysicalCellWidth) or 128))
+	local defaultCellHeight = math.max(1, math.floor(tonumber(options.defaultCellHeight) or 284))
+
+	local gridRecords = {}
+	local connections = {}
+	local cameraConnection = nil
+	local applying = false
+
+	local function track(connection)
+		table.insert(connections, connection)
+		return connection
+	end
+
+	local function computeCellWidth(columnCount)
+		return math.max(
+			minCellWidth,
+			math.floor(((referenceContentWidth - usableInset) - ((columnCount - 1) * padPx)) / columnCount)
+		)
+	end
+
+	local function getCurrentFitScale()
+		local scale = root:FindFirstChild(RESPONSIVE_SCALE_NAME)
+		if scale and scale:IsA("UIScale") then
+			return math.clamp(tonumber(scale.Scale) or 1, 0.1, 1)
+		end
+
+		return computeResponsiveScale(root, options)
+	end
+
+	local function resolveCellWidth()
+		local preferredCellWidth = computeCellWidth(preferredColumns)
+		if (preferredCellWidth * getCurrentFitScale()) >= minPhysicalCellWidth then
+			return preferredCellWidth
+		end
+
+		return computeCellWidth(fallbackColumns)
+	end
+
+	local function applyGrid(grid)
+		if not (grid and grid.Parent and grid:IsA("UIGridLayout")) then
+			return
+		end
+		if not isPhoneViewport() then
+			return
+		end
+
+		local height = tonumber(grid.CellSize.Y.Offset) or 0
+		if height <= 0 then
+			height = defaultCellHeight
+		end
+
+		applying = true
+		grid.CellSize = UDim2.fromOffset(resolveCellWidth(), height)
+		grid.CellPadding = UDim2.fromOffset(padPx, padPx)
+		applying = false
+	end
+
+	local function applyBoundGrids()
+		for grid in pairs(gridRecords) do
+			applyGrid(grid)
+		end
+	end
+
+	local function bindGrid(grid)
+		if gridRecords[grid] or not grid:IsA("UIGridLayout") then
+			return
+		end
+
+		gridRecords[grid] = true
+		track(grid:GetPropertyChangedSignal("CellSize"):Connect(function()
+			if not applying then
+				applyGrid(grid)
+			end
+		end))
+		track(grid:GetPropertyChangedSignal("CellPadding"):Connect(function()
+			if not applying then
+				applyGrid(grid)
+			end
+		end))
+		track(grid.Destroying:Connect(function()
+			gridRecords[grid] = nil
+		end))
+
+		applyGrid(grid)
+	end
+
+	for _, descendant in ipairs(content:GetDescendants()) do
+		if descendant:IsA("UIGridLayout") then
+			bindGrid(descendant)
+		end
+	end
+
+	track(content.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("UIGridLayout") then
+			bindGrid(descendant)
+		end
+	end))
+	track(content:GetPropertyChangedSignal("AbsoluteSize"):Connect(applyBoundGrids))
+	local fitScale = root:FindFirstChild(RESPONSIVE_SCALE_NAME)
+	if fitScale and fitScale:IsA("UIScale") then
+		track(fitScale:GetPropertyChangedSignal("Scale"):Connect(applyBoundGrids))
+	end
+	track(root.ChildAdded:Connect(function(child)
+		if child.Name == RESPONSIVE_SCALE_NAME and child:IsA("UIScale") then
+			track(child:GetPropertyChangedSignal("Scale"):Connect(applyBoundGrids))
+			applyBoundGrids()
+		end
+	end))
+
+	local function bindCamera()
+		if cameraConnection then
+			cameraConnection:Disconnect()
+			cameraConnection = nil
+		end
+
+		local camera = Workspace.CurrentCamera
+		if camera then
+			cameraConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyBoundGrids)
+		end
+	end
+
+	bindCamera()
+	track(Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		bindCamera()
+		applyBoundGrids()
+	end))
+
+	boundStoreReferenceGridGuis[gui] = {
+		update = applyBoundGrids,
+	}
+
+	gui.Destroying:Connect(function()
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		if cameraConnection then
+			cameraConnection:Disconnect()
+			cameraConnection = nil
+		end
+		boundStoreReferenceGridGuis[gui] = nil
+	end)
+
+	task.defer(applyBoundGrids)
+
+	return gui
 end
 
 function WipInstanceModalBridge.HasSourceGui(guiName)
@@ -194,7 +559,9 @@ function WipInstanceModalBridge.BindModal(options)
 		end
 	end
 
-	local unregister = ReactModalRegistry.Register(modalName, handlers)
+	local unregister = ReactModalRegistry.Register(modalName, handlers, {
+		priority = tonumber(options.registryPriority) or WIP_MODAL_REGISTRY_PRIORITY,
+	})
 	boundModalGuis[gui] = {
 		modalName = modalName,
 		unregister = unregister,
