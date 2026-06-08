@@ -1529,6 +1529,9 @@ local function processTutorialCommand(player, argumentText, commandContext)
 	return true, detail
 end
 
+local processCrewCanaryCommand
+
+do
 local CREW_CANARY_HELPER_STATUS_ITEMS = {
 	"Frigo Camelo",
 	"Lirili Larila",
@@ -2714,7 +2717,7 @@ local function ensureCrewMigrationAuditSession(player)
 	return flags, nil
 end
 
-local function processCrewCanaryCommand(player, argumentText)
+processCrewCanaryCommand = function(player, argumentText)
 	if not isAuthorized(player) then
 		return
 	end
@@ -5710,6 +5713,8 @@ local function processCrewCanaryCommand(player, argumentText)
 				.. summarizeCrewCanaryModelPreviewRows(previewRows, flags)
 	end
 	return true, "CrewMember canary status printed to server output."
+end
+
 end
 
 local function processWipePlayerCommand(player, argumentText, commandName)
