@@ -63,6 +63,22 @@ local function coerceBoolean(value, fallback)
 	return fallback
 end
 
+local function trim(value)
+	local text = tostring(value or "")
+	return text:match("^%s*(.-)%s*$") or ""
+end
+
+local function normalizeRedeemedCodeKey(code)
+	local normalized = string.upper(trim(code))
+	if normalized == "" or #normalized > 32 then
+		return nil
+	end
+	if normalized:match("^[A-Z0-9_%-]+$") == nil then
+		return nil
+	end
+	return normalized
+end
+
 local function getVariantAndBaseName(fullName)
 	fullName = tostring(fullName or "")
 
@@ -768,6 +784,46 @@ function ProfileMigrations.Apply(data)
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = true
 	elseif coerceNumber(hiddenLeaderstats.Speed, 1) <= 1 then
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = false
+	end
+
+	local socialRewards = ensureTable(data, "SocialRewards")
+	local groupLikeLuffyReward = ensureTable(socialRewards, "GroupLikeLuffy")
+	groupLikeLuffyReward.Claimed = coerceBoolean(groupLikeLuffyReward.Claimed, false)
+	groupLikeLuffyReward.ClaimedAtUnix = math.max(0, math.floor(coerceNumber(groupLikeLuffyReward.ClaimedAtUnix, 0)))
+
+	local codes = ensureTable(data, "Codes")
+	local redeemedCodes = ensureTable(codes, "Redeemed")
+	for rawCode, rawState in pairs(redeemedCodes) do
+		local code = normalizeRedeemedCodeKey(rawCode)
+		if code == nil then
+			redeemedCodes[rawCode] = nil
+			continue
+		end
+
+		local nextState
+		if typeof(rawState) == "table" then
+			nextState = rawState
+			nextState.RedeemedAtUnix = math.max(0, math.floor(coerceNumber(nextState.RedeemedAtUnix, 0)))
+			if nextState.CodeVersion ~= nil and typeof(nextState.CodeVersion) ~= "string" then
+				nextState.CodeVersion = tostring(nextState.CodeVersion)
+			end
+			if nextState.DisplayName ~= nil and typeof(nextState.DisplayName) ~= "string" then
+				nextState.DisplayName = tostring(nextState.DisplayName)
+			end
+		elseif rawState == true then
+			nextState = {
+				RedeemedAtUnix = 0,
+			}
+		end
+
+		if nextState == nil then
+			redeemedCodes[rawCode] = nil
+		elseif code ~= rawCode then
+			redeemedCodes[rawCode] = nil
+			redeemedCodes[code] = nextState
+		else
+			redeemedCodes[code] = nextState
+		end
 	end
 
 	local tutorials = ensureTable(data, "Tutorials")

@@ -4047,7 +4047,113 @@ function Service.ExtractRun(player)
 	return extractRun(player)
 end
 
-function Service.GrantChest(player, tierName, amount, depthBand, options)
+function Service._NormalizeGrantDataPath(path)
+	local segments = {}
+	if typeof(path) == "table" then
+		for _, segment in ipairs(path) do
+			local text = tostring(segment or "")
+			if text ~= "" and text ~= "Data" then
+				segments[#segments + 1] = text
+			end
+		end
+	else
+		local text = tostring(path or "")
+		text = string.gsub(text, "^Data%.", "")
+		for segment in string.gmatch(text, "[^%.]+") do
+			if segment ~= "" and segment ~= "Data" then
+				segments[#segments + 1] = segment
+			end
+		end
+	end
+	return segments
+end
+
+function Service._ReadGrantDataPath(dataRoot, path)
+	local segments = Service._NormalizeGrantDataPath(path)
+	local cursor = dataRoot
+	for _, segment in ipairs(segments) do
+		if typeof(cursor) ~= "table" then
+			return nil
+		end
+		cursor = cursor[segment]
+	end
+	return cursor
+end
+
+function Service._WriteGrantDataPath(dataRoot, path, value)
+	local segments = Service._NormalizeGrantDataPath(path)
+	if #segments <= 0 or typeof(dataRoot) ~= "table" then
+		return nil
+	end
+
+	local cursor = dataRoot
+	for index = 1, #segments - 1 do
+		local segment = segments[index]
+		local nextValue = cursor[segment]
+		if typeof(nextValue) ~= "table" then
+			nextValue = {}
+			cursor[segment] = nextValue
+		end
+		cursor = nextValue
+	end
+
+	cursor[segments[#segments]] = value
+	return segments
+end
+
+function Service.ApplyChestStackGrantToDataRoot(dataRoot, tierName, amount, options)
+	if typeof(dataRoot) ~= "table" then
+		return {
+			ok = false,
+			error = "invalid_data_root",
+		}
+	end
+
+	local normalizedTier = ChestUtils.ResolveStandardTier(tierName)
+	if normalizedTier == nil or Economy.Chests.Tiers[normalizedTier] == nil then
+		return {
+			ok = false,
+			error = "invalid_chest_tier",
+		}
+	end
+
+	local count = math.max(1, math.floor(tonumber(amount) or 1))
+	options = if typeof(options) == "table" then options else {}
+	if options.PaidRandomItem == true or options.RequiresPaidRandomItemPolicy == true then
+		return {
+			ok = false,
+			error = "paid_random_not_supported",
+		}
+	end
+
+	local unopenedChests = ensureUnopenedChestCollection(dataRoot)
+	local chestData = ChestUtils.BuildChestData({
+		ChestKind = ChestRewards.ChestKinds.Standard,
+		Tier = normalizedTier,
+		DepthBand = tostring(options.DepthBand or Economy.VerticalSlice.DefaultDepthBand),
+		Source = tostring(options.Source or "Admin"),
+	})
+	local chestRef, storedChest, addedCount = addUnopenedChestToCollection(unopenedChests, chestData, count)
+	local grantedCount = math.max(0, tonumber(addedCount) or (chestRef ~= nil and 1 or 0))
+	if grantedCount <= 0 then
+		return {
+			ok = false,
+			error = "grant_failed",
+		}
+	end
+
+	return {
+		ok = true,
+		Tier = normalizedTier,
+		Amount = grantedCount,
+		ChestRef = chestRef,
+		DisplayName = ChestUtils.GetDisplayName(storedChest or chestData),
+		UnopenedChests = unopenedChests,
+		Summary = buildChestSummary(chestRef, chestData, grantedCount),
+	}
+end
+
+function Service._GrantChestInternal(player, tierName, amount, depthBand, options)
 	if not waitForDataReady(player, 10) then
 		return resolveActionResponse(player, false, nil, "profile_not_ready")
 	end
@@ -4085,6 +4191,21 @@ function Service.GrantChest(player, tierName, amount, depthBand, options)
 	end
 
 	local dataRoot = profile.Data
+	local claimPath = if typeof(options) == "table" then (options.ClaimPath or options.OnceClaimPath) else nil
+	if claimPath ~= nil and #Service._NormalizeGrantDataPath(claimPath) <= 0 then
+		return resolveActionResponse(player, false, nil, "missing_claim_path")
+	end
+	if claimPath ~= nil and Service._ReadGrantDataPath(dataRoot, claimPath) == true then
+		local response = resolveActionResponse(
+			player,
+			false,
+			tostring(options.AlreadyClaimedMessage or "Reward already claimed."),
+			"already_claimed"
+		)
+		response.claimed = true
+		return response
+	end
+
 	local unopenedChests = ensureUnopenedChestCollection(dataRoot)
 	local chestData = ChestUtils.BuildChestData({
 		ChestKind = ChestRewards.ChestKinds.Standard,
@@ -4102,9 +4223,25 @@ function Service.GrantChest(player, tierName, amount, depthBand, options)
 		return resolveActionResponse(player, false, nil, "grant_failed")
 	end
 
-	syncPaths(player, replica, {
+	local changedPaths = {
 		{ Path = { "UnopenedChests" }, Value = unopenedChests },
-	}, {
+	}
+	if claimPath ~= nil then
+		local claimPathSegments = Service._WriteGrantDataPath(dataRoot, claimPath, true)
+		if claimPathSegments then
+			changedPaths[#changedPaths + 1] = { Path = claimPathSegments, Value = true }
+		end
+
+		if options.ClaimedAtPath ~= nil then
+			local claimedAtUnix = math.max(0, math.floor(tonumber(options.ClaimedAtUnix) or os.time()))
+			local claimedAtPathSegments = Service._WriteGrantDataPath(dataRoot, options.ClaimedAtPath, claimedAtUnix)
+			if claimedAtPathSegments then
+				changedPaths[#changedPaths + 1] = { Path = claimedAtPathSegments, Value = claimedAtUnix }
+			end
+		end
+	end
+
+	syncPaths(player, replica, changedPaths, {
 		Target = "glr_grant_chest_reward",
 	})
 
@@ -4115,6 +4252,18 @@ function Service.GrantChest(player, tierName, amount, depthBand, options)
 		grantedCount == 1 and " Chest" or " Chests"
 	)
 	return resolveActionResponse(player, true, message)
+end
+
+function Service.GrantChest(player, tierName, amount, depthBand, options)
+	return Service._GrantChestInternal(player, tierName, amount, depthBand, options)
+end
+
+function Service.GrantChestOnce(player, tierName, amount, depthBand, options)
+	options = if typeof(options) == "table" then options else {}
+	if options.ClaimPath == nil and options.OnceClaimPath == nil then
+		return resolveActionResponse(player, false, nil, "missing_claim_path")
+	end
+	return Service._GrantChestInternal(player, tierName, amount, depthBand, options)
 end
 
 function Service.OpenChest(player, chestId)

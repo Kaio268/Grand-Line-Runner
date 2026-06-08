@@ -1,420 +1,79 @@
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local WipInstanceModalBridge = require(script.Parent:WaitForChild("WipInstanceModalBridge"))
+local RobuxShopCodesPanel = require(script.Parent:WaitForChild("RobuxShopCodesPanel"))
 
-local _, ownsWipShop = WipInstanceModalBridge.BindOwnedModal({
-	guiName = "RobuxShopGui",
-	modalName = "Store",
-	timeoutSeconds = 10,
-	allowToggle = true,
-	consumeRecentExternalToggle = true,
-	reconcileToggle = true,
-	onBound = function(gui)
-		WipInstanceModalBridge.BindResponsiveModal(gui, {
-			rootName = "ShopCard",
-			displayOrder = 200,
-			margin = 24,
-			designSize = Vector2.new(1728, 972),
-		})
-		WipInstanceModalBridge.BindStoreReferenceGrid(gui, {
-			rootName = "ShopCard",
-			contentName = "Content",
-			referenceContentWidth = 1688,
-			columns = 3,
-			fallbackColumns = 2,
-			padding = 14,
-			usableInset = 22,
-			minPhysicalCellWidth = 128,
-			designSize = Vector2.new(1728, 972),
-			margin = 24,
-		})
-	end,
-})
-if ownsWipShop then
-	return
-end
+local SHOP_GUI_NAME = "RobuxShopGui"
+local STORE_MODAL_NAME = "Store"
 
-local Packages = ReplicatedStorage:WaitForChild("Packages")
-local Modules = ReplicatedStorage:WaitForChild("Modules")
-local UiFolder = ReplicatedStorage:WaitForChild("UI")
-
-local React = require(Packages:WaitForChild("React"))
-local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
-local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
-local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
-local Responsive = require(UiFolder:WaitForChild("Responsive"))
-
-local ShopFolder = UiFolder:WaitForChild("Shop")
-local ShopShell = require(ShopFolder:WaitForChild("ShopShell"))
-local Catalog = require(ShopFolder:WaitForChild("Catalog"))
-local PurchaseAdapter = require(ShopFolder:WaitForChild("PurchaseAdapter"))
-
-local rootContainer = Instance.new("Folder")
-rootContainer.Name = "ReactShopRoot"
-
-local root = ReactRoblox.createRoot(rootContainer)
-
-local destroyed = false
-local renderQueued = false
-local noticeText = nil
-local noticeToken = 0
-local requestedSectionKey = nil
-local requestedSectionRequestId = 0
-
-local STORE_FRAME_SIZE = UDim2.fromScale(0.84, 0.78)
-local STORE_MOBILE_FRAME_SIZE = UDim2.fromScale(0.9, 0.84)
-local STORE_MIN_SIZE = Vector2.new(900, 620)
-local STORE_MAX_SIZE = Vector2.new(1200, 780)
-
-local modalAdapter = ReactFrameModalAdapter.new({
-	playerGui = playerGui,
-	frameName = "Store",
-	hostName = "ReactStoreHost",
-	backdropName = "ReactStoreBackdrop",
-	backdropActive = false,
-	modalStateKey = "ShopModal",
-	frameSize = STORE_FRAME_SIZE,
-	minSize = STORE_MIN_SIZE,
-	maxSize = STORE_MAX_SIZE,
-	createFrameIfMissing = true,
-	standalone = true,
-})
-
-local purchaseAdapter = PurchaseAdapter.new(player)
-local cleanupConnections = {}
-local scheduleRender
-
-local function requestSectionFromPayload(payload)
-	if typeof(payload) ~= "table" then
+local function configureRobuxShopGui(gui)
+	if not (gui and gui:IsA("ScreenGui")) then
 		return
 	end
 
-	local sectionKey = tostring(payload.SectionKey or payload.sectionKey or "")
-	if sectionKey == "" then
+	WipInstanceModalBridge.BindResponsiveModal(gui, {
+		rootName = "ShopCard",
+		displayOrder = 200,
+		margin = 24,
+		designSize = Vector2.new(1728, 972),
+	})
+	WipInstanceModalBridge.BindStoreReferenceGrid(gui, {
+		rootName = "ShopCard",
+		contentName = "Content",
+		referenceContentWidth = 1688,
+		columns = 3,
+		fallbackColumns = 2,
+		padding = 14,
+		usableInset = 22,
+		minPhysicalCellWidth = 128,
+		designSize = Vector2.new(1728, 972),
+		margin = 24,
+	})
+	RobuxShopCodesPanel.BindGui(gui)
+end
+
+local function bindRobuxShopGui(gui)
+	if not (gui and gui:IsA("ScreenGui")) then
 		return
 	end
 
-	requestedSectionKey = sectionKey
-	requestedSectionRequestId += 1
-end
-
-local unregisterModal = ReactModalRegistry.Register("Store", {
-	toggle = function()
-		purchaseAdapter:refreshOwnership()
-		modalAdapter:Toggle()
-		if scheduleRender then
-			scheduleRender()
-		end
-	end,
-	open = function(payload)
-		requestSectionFromPayload(payload)
-		purchaseAdapter:refreshOwnership()
-		if not modalAdapter:IsVisible() then
-			modalAdapter:Toggle()
-		end
-		if scheduleRender then
-			scheduleRender()
-		end
-	end,
-	close = function()
-		modalAdapter:Close()
-	end,
-	isVisible = function()
-		return modalAdapter:IsVisible()
-	end,
-})
-
-local LEGACY_CREW_TERM = "Brain" .. "rots"
-local LEGACY_MONEY_TERM = "Mo" .. "ney"
-local LEGACY_STORE_COPY_REPLACEMENTS = {
-	["Earn x2 " .. LEGACY_MONEY_TERM .. " and make 2x more from " .. LEGACY_CREW_TERM] = "Earn 2x Beli and make 2x more from Crewmates",
-	["Earn x2 " .. LEGACY_MONEY_TERM .. " and make 2x more from Crewmates"] = "Earn 2x Beli and make 2x more from Crewmates",
-}
-local watchedStoreTextObjects = {}
-local watchedStoreRoots = {}
-
-local function patchLegacyStoreTextObject(descendant)
-	if not (descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox")) then
-		return
-	end
-
-	local replacement = LEGACY_STORE_COPY_REPLACEMENTS[descendant.Text]
-	if replacement then
-		descendant.Text = replacement
-	end
-
-	if watchedStoreTextObjects[descendant] then
-		return
-	end
-	watchedStoreTextObjects[descendant] = true
-
-	descendant:GetPropertyChangedSignal("Text"):Connect(function()
-		local nextReplacement = LEGACY_STORE_COPY_REPLACEMENTS[descendant.Text]
-		if nextReplacement then
-			descendant.Text = nextReplacement
-		end
-	end)
-end
-
-local function normalizeLegacyStoreCopy(guiRoot)
-	if not guiRoot then
-		return
-	end
-
-	patchLegacyStoreTextObject(guiRoot)
-	for _, descendant in ipairs(guiRoot:GetDescendants()) do
-		patchLegacyStoreTextObject(descendant)
-	end
-
-	if watchedStoreRoots[guiRoot] then
-		return
-	end
-	watchedStoreRoots[guiRoot] = true
-	guiRoot.DescendantAdded:Connect(patchLegacyStoreTextObject)
-end
-
-local function suppressLegacyStoreDecor()
-	local storeFrame = modalAdapter:GetFrame()
-	local shopHost = storeFrame and storeFrame:FindFirstChild("ReactStoreHost")
-	if not storeFrame then
-		return
-	end
-	normalizeLegacyStoreCopy(storeFrame)
-
-	for _, child in ipairs(storeFrame:GetChildren()) do
-		if child ~= shopHost then
-			if child:IsA("GuiObject") then
-				child.Visible = false
-			elseif child:IsA("UIStroke") or child:IsA("UIGradient") then
-				child.Enabled = false
-			end
-		end
-	end
-end
-
-local function ensureStoreFrameLayout()
-	local storeFrame = modalAdapter:GetFrame()
-	local shopHost = storeFrame and storeFrame:FindFirstChild("ReactStoreHost")
-	if not (storeFrame and shopHost) then
-		return
-	end
-
-	local viewport = Responsive.getViewport()
-	local isMobile = Responsive.isMobile(viewport)
-
-	storeFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	storeFrame.Position = UDim2.fromScale(0.5, 0.5)
-	storeFrame.Size = if isMobile then STORE_MOBILE_FRAME_SIZE else STORE_FRAME_SIZE
-	storeFrame.ClipsDescendants = false
-	storeFrame.Active = true
-	storeFrame.ZIndex = 120
-	shopHost.ClipsDescendants = false
-	shopHost.ZIndex = 140
-
-	local sizeConstraint = storeFrame:FindFirstChild("ReactStoreSizeConstraint")
-	if not sizeConstraint then
-		sizeConstraint = Instance.new("UISizeConstraint")
-		sizeConstraint.Name = "ReactStoreSizeConstraint"
-		sizeConstraint.Parent = storeFrame
-	end
-
-	local constraintScale = if isMobile then 1 else Responsive.getUiScale(viewport)
-	local availableSize = Vector2.new(math.max(1, viewport.X - 24), math.max(1, viewport.Y - 24))
-	local configuredMax = Vector2.new(STORE_MAX_SIZE.X * constraintScale, STORE_MAX_SIZE.Y * constraintScale)
-	local configuredMin = Vector2.new(STORE_MIN_SIZE.X * constraintScale, STORE_MIN_SIZE.Y * constraintScale)
-	local maxSize = Vector2.new(math.min(configuredMax.X, availableSize.X), math.min(configuredMax.Y, availableSize.Y))
-	sizeConstraint.MinSize = Vector2.new(math.min(configuredMin.X, maxSize.X), math.min(configuredMin.Y, maxSize.Y))
-	sizeConstraint.MaxSize = maxSize
-end
-
-local function syncOverlayState()
-	modalAdapter:SyncOverlayState()
-end
-
-local function disconnectAll()
-	for _, connection in ipairs(cleanupConnections) do
-		connection:Disconnect()
-	end
-	table.clear(cleanupConnections)
-end
-
-local function shutdownReactFallback()
-	if destroyed then
-		return
-	end
-
-	destroyed = true
-	disconnectAll()
-	unregisterModal()
-	purchaseAdapter:destroy()
-	modalAdapter:Destroy()
-	root:unmount()
-end
-
-local function hideLegacyStoreContents()
-	local storeFrame = modalAdapter:GetFrame()
-	local shopHost = storeFrame and storeFrame:FindFirstChild("ReactStoreHost")
-	if not (storeFrame and shopHost) then
-		return
-	end
-
-	ensureStoreFrameLayout()
-	syncOverlayState()
-	storeFrame.BackgroundTransparency = 1
-	storeFrame.BorderSizePixel = 0
-	storeFrame.ClipsDescendants = false
-	shopHost.ClipsDescendants = false
-	suppressLegacyStoreDecor()
-
-	for _, child in ipairs(storeFrame:GetChildren()) do
-		if child ~= shopHost and child:IsA("GuiObject") then
-			child.Visible = false
-		end
-	end
-end
-
-local function setNotice(text)
-	noticeText = text
-	noticeToken += 1
-	local currentToken = noticeToken
-
-	if scheduleRender then
-		scheduleRender()
-	end
-
-	if text then
-		task.delay(2.8, function()
-			if destroyed or noticeToken ~= currentToken then
-				return
-			end
-
-			noticeText = nil
-			if scheduleRender then
-				scheduleRender()
-			end
-		end)
-	end
-end
-
-local function buildCatalogViewModel()
-	local catalog = {
-		title = Catalog.title,
-		featuredSections = {},
-		sections = {},
-	}
-
-	for sectionIndex, section in ipairs(Catalog.featuredSections or {}) do
-		local sectionModel = {
-			key = section.key,
-			title = section.title,
-			eyebrow = section.eyebrow,
-			description = section.description,
-			themeKey = section.themeKey,
-			items = {},
-		}
-
-		for itemIndex, item in ipairs(section.items or {}) do
-			sectionModel.items[itemIndex] = purchaseAdapter:getViewModel(item)
-		end
-
-		catalog.featuredSections[sectionIndex] = sectionModel
-	end
-
-	for sectionIndex, section in ipairs(Catalog.sections or {}) do
-		local sectionModel = {
-			key = section.key,
-			title = section.title,
-			eyebrow = section.eyebrow,
-			description = section.description,
-			themeKey = section.themeKey,
-			items = {},
-		}
-
-		for itemIndex, item in ipairs(section.items or {}) do
-			sectionModel.items[itemIndex] = purchaseAdapter:getViewModel(item)
-		end
-
-		catalog.sections[sectionIndex] = sectionModel
-	end
-
-	return catalog
-end
-
-local function render()
-	local host = modalAdapter:EnsureHost()
-	if not host then
-		return
-	end
-	hideLegacyStoreContents()
-
-	local catalogView = buildCatalogViewModel()
-	root:render(ReactRoblox.createPortal(React.createElement(ShopShell, {
-		catalog = catalogView,
-		noticeText = noticeText,
-		requestedSectionKey = requestedSectionKey,
-		requestedSectionRequestId = requestedSectionRequestId,
-		onClose = function()
-			modalAdapter:Close()
-		end,
-		onPurchaseRequested = function(item, selectedVariant)
-			local success, message = purchaseAdapter:requestPurchase(item, selectedVariant)
-			if not success and message then
-				setNotice(message)
-			end
-		end,
-		onSectionSelected = function()
-		end,
-	}), host))
-end
-
-scheduleRender = function()
-	if renderQueued or destroyed then
-		return
-	end
-
-	renderQueued = true
-	task.defer(function()
-		renderQueued = false
-		if not destroyed then
-			render()
-		end
-	end)
-end
-
-purchaseAdapter:primeCatalog(Catalog)
-
-table.insert(cleanupConnections, purchaseAdapter:subscribe(scheduleRender))
-modalAdapter:SetScheduleRender(scheduleRender)
-modalAdapter:BindFramesFolderTracking()
-local lateWipShopConnection = WipInstanceModalBridge.WatchGui("RobuxShopGui", function(gui)
 	WipInstanceModalBridge.BindModal({
 		gui = gui,
-		modalName = "Store",
+		modalName = STORE_MODAL_NAME,
 		allowToggle = true,
 		consumeRecentExternalToggle = true,
 		reconcileToggle = true,
 	})
-	shutdownReactFallback()
-end)
-if lateWipShopConnection then
-	table.insert(cleanupConnections, lateWipShopConnection)
+	configureRobuxShopGui(gui)
 end
-table.insert(cleanupConnections, playerGui.ChildAdded:Connect(function(child)
-	if child.Name == "Frames" or child.Name == "OpenUI" then
-		modalAdapter:HandlePlayerGuiChildAdded(child)
-	end
-end))
-table.insert(cleanupConnections, playerGui.ChildRemoved:Connect(function(child)
-	if child.Name == "Frames" or child.Name == "OpenUI" then
-		modalAdapter:HandlePlayerGuiChildRemoved(child)
-	end
-end))
 
-render()
+local boundGui, ownsWipShop = WipInstanceModalBridge.BindOwnedModal({
+	guiName = SHOP_GUI_NAME,
+	modalName = STORE_MODAL_NAME,
+	timeoutSeconds = 10,
+	allowToggle = true,
+	consumeRecentExternalToggle = true,
+	reconcileToggle = true,
+	onBound = configureRobuxShopGui,
+})
 
-script.Destroying:Connect(function()
-	shutdownReactFallback()
-end)
+if not ownsWipShop then
+	warn("[Shop] RobuxShopGui was not found in PlayerGui or StarterGui. Store has no live shop GUI to bind.")
+
+	local lateConnection = WipInstanceModalBridge.WatchGui(SHOP_GUI_NAME, bindRobuxShopGui)
+	if lateConnection then
+		script.Destroying:Connect(function()
+			lateConnection:Disconnect()
+		end)
+	end
+elseif not boundGui then
+	task.delay(10, function()
+		if playerGui:FindFirstChild(SHOP_GUI_NAME) then
+			return
+		end
+
+		warn("[Shop] RobuxShopGui is expected from StarterGui but was not added to PlayerGui yet.")
+	end)
+end

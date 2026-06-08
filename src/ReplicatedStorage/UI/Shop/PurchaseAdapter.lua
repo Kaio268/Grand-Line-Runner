@@ -14,6 +14,7 @@ local DEFAULT_PAID_RANDOM_POLICY_STATE = {
 	Status = "unknown",
 	Reason = "policy_unknown",
 }
+local CODE_REDEEM_REMOTE_NAME = "CodeRedeemRequest"
 
 local function copyTable(source)
 	return table.clone(source)
@@ -72,6 +73,11 @@ local function getShopProductPromptRemoteName()
 	return tostring(MonetizationConfig.ShopProductPromptRemoteName or "ShopProductPromptRequest")
 end
 
+local function trim(value)
+	local text = tostring(value or "")
+	return text:match("^%s*(.-)%s*$") or ""
+end
+
 local function normalizePolicyState(state)
 	if typeof(state) ~= "table" then
 		return table.clone(DEFAULT_PAID_RANDOM_POLICY_STATE)
@@ -109,6 +115,9 @@ function PurchaseAdapter.new(player)
 	self._policyStateRequest = nil
 	self._paidRandomPromptRequest = nil
 	self._shopProductPromptRequest = nil
+	self._codeRedeemRequest = nil
+	self._codeRedeemPending = false
+	self._codeRedeemMessage = "Codes can expire, so redeem them while they are active."
 
 	self:_bindPasses()
 	self:_bindPromptSignals()
@@ -298,6 +307,15 @@ function PurchaseAdapter:_getShopProductPromptRequest()
 
 	self._shopProductPromptRequest = self:_getRemoteFunction(getShopProductPromptRemoteName())
 	return self._shopProductPromptRequest
+end
+
+function PurchaseAdapter:_getCodeRedeemRequest()
+	if self._codeRedeemRequest and self._codeRedeemRequest.Parent then
+		return self._codeRedeemRequest
+	end
+
+	self._codeRedeemRequest = self:_getRemoteFunction(CODE_REDEEM_REMOTE_NAME)
+	return self._codeRedeemRequest
 end
 
 function PurchaseAdapter:_refreshPaidRandomItems()
@@ -501,6 +519,59 @@ function PurchaseAdapter:getViewModel(item)
 		end
 	end
 	return model
+end
+
+function PurchaseAdapter:getCodeRedeemState()
+	return {
+		isPending = self._codeRedeemPending == true,
+		message = self._codeRedeemMessage,
+	}
+end
+
+function PurchaseAdapter:redeemCode(rawCode)
+	local code = trim(rawCode)
+	if code == "" then
+		self._codeRedeemMessage = "Enter a code first."
+		self:_emitChanged()
+		return false, self._codeRedeemMessage
+	end
+
+	if self._codeRedeemPending == true then
+		return false, "A code is already being redeemed."
+	end
+
+	local remote = self:_getCodeRedeemRequest()
+	if not remote then
+		self._codeRedeemMessage = "Code redemption is not available yet."
+		self:_emitChanged()
+		return false, self._codeRedeemMessage
+	end
+
+	self._codeRedeemPending = true
+	self._codeRedeemMessage = "Redeeming code..."
+	self:_emitChanged()
+
+	local ok, response = pcall(function()
+		return remote:InvokeServer("Redeem", {
+			Code = code,
+		})
+	end)
+
+	self._codeRedeemPending = false
+
+	if ok and typeof(response) == "table" then
+		local message = tostring(response.message or "")
+		if message == "" then
+			message = if response.ok == true then "Code redeemed!" else "Code redemption failed."
+		end
+		self._codeRedeemMessage = message
+		self:_emitChanged()
+		return response.ok == true, message, response
+	end
+
+	self._codeRedeemMessage = "Code redemption failed. Try again soon."
+	self:_emitChanged()
+	return false, self._codeRedeemMessage
 end
 
 function PurchaseAdapter:requestPurchase(item, selectedVariant)

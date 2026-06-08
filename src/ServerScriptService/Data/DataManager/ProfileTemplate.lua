@@ -32,6 +32,17 @@ local ProfileTemplate = {
 		Queue = {},
 	},
 
+	SocialRewards = {
+		GroupLikeLuffy = {
+			Claimed = false,
+			ClaimedAtUnix = 0,
+		},
+	},
+
+	Codes = {
+		Redeemed = {},
+	},
+
 	TotalStats = {
 		[primaryCurrency.TotalKey] = 0,
 		TotalSpeed = 0,

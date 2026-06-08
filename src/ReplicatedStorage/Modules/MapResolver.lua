@@ -34,6 +34,7 @@ local PATH_LABELS = {
 	VipDoorParts = "active map VIPDoorParts",
 	SellNpc = "sell NPC",
 	AFKRayleighNpc = "AFK Rayleigh NPC",
+	GroupLikeLuffyNpc = "Group Like Luffy NPC",
 	GroupReward = "active map GroupReward",
 	GroupRewardPrompt = "active map GroupReward prompt",
 	CorridorEntry = "active map corridor entry",
@@ -399,6 +400,10 @@ local function collectRefs(options)
 	refs.AFKRayleighNpc = findChildPathInRoots(activeMapRoots, { "NPC", "AFK", "Rayleigh" }, nil, false)
 		or findChildPathInRoots(activeMapRoots, { "NPC", "AFK", "Rayleigh" }, nil, true)
 		or getChildPath(lobby, { "NPC", "AFK", "Rayleigh" })
+	refs.GroupLikeLuffyNpc = findChildPathInRoots(activeMapRoots, { "NPC", "GroupLike", "Luffy" }, nil, false)
+		or findChildPathInRoots(activeMapRoots, { "NPC", "GroupLike", "Luffy" }, nil, true)
+		or findChildPathInRoots(activeMapRoots, { "NPC", "group-like", "Luffy" }, nil, true)
+		or getChildPath(lobby, { "NPC", "GroupLike", "Luffy" })
 	refs.GroupReward = groupReward
 	refs.GroupRewardHitBox = groupRewardHitBox
 	refs.GroupRewardPrompt = groupRewardHitBox
