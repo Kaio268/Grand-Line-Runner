@@ -12,7 +12,6 @@ local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
-local Responsive = require(UiFolder:WaitForChild("Responsive"))
 
 local SettingsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Settings"))
 local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
@@ -42,6 +41,8 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	maxSize = Vector2.new(1240, 760),
 	frameSize = SETTINGS_FRAME_SIZE,
 	useResponsiveUiScale = false,
+	frameClipsDescendants = false,
+	hostClipsDescendants = false,
 	createFrameIfMissing = true,
 	standalone = true,
 })
@@ -466,34 +467,11 @@ local function bindEarnedSpeedValue()
 	end, cleanupConnections)
 end
 
-local function prepareFrame()
-	local frame = modalAdapter:GetFrame()
-	if not frame then
-		return
-	end
-
-	local mobile = Responsive.isMobile()
-	if frame.Visible ~= true and not mobile then
-		frame.Size = SETTINGS_FRAME_SIZE
-	end
-	frame.BackgroundTransparency = 1
-	frame.ZIndex = 120
-	frame.ClipsDescendants = false
-
-	local host = frame:FindFirstChild("ReactSettingsHost")
-	if host and host:IsA("GuiObject") then
-		host.ZIndex = 140
-		host.ClipsDescendants = false
-	end
-end
-
 local function render()
 	local host = modalAdapter:EnsureHost()
 	if not host then
 		return
 	end
-
-	prepareFrame()
 
 	root:render(ReactRoblox.createPortal(e(SettingsScreen, {
 		items = buildItems(),

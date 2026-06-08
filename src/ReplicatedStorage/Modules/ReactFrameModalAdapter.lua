@@ -145,6 +145,8 @@ function ReactFrameModalAdapter.new(options)
 	self.createFrameIfMissing = options.createFrameIfMissing == true
 	self.standalone = options.standalone == true
 	self.frameBackgroundTransparency = options.frameBackgroundTransparency
+	self.frameClipsDescendants = options.frameClipsDescendants ~= false
+	self.hostClipsDescendants = options.hostClipsDescendants ~= false
 	self.frameZIndex = options.frameZIndex or 120
 	self.hostZIndex = options.hostZIndex or 140
 	self.bypassLegacyScaleAnimation = options.bypassLegacyScaleAnimation == true
@@ -353,7 +355,7 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 	frame.AnchorPoint = Vector2.new(0.5, 0.5)
 	frame.BackgroundTransparency = self.frameBackgroundTransparency ~= nil and self.frameBackgroundTransparency or 1
 	frame.BorderSizePixel = 0
-	frame.ClipsDescendants = true
+	frame.ClipsDescendants = self.frameClipsDescendants
 	if self.bypassLegacyScaleAnimation then
 		frame:SetAttribute(BYPASS_OPEN_UI_SCALE_ANIMATION_ATTRIBUTE, true)
 		local scale = frame:FindFirstChildOfClass("UIScale")
@@ -630,7 +632,7 @@ function ReactFrameModalAdapter:EnsureHost()
 	host.Position = UDim2.fromScale(0.5, 0.5)
 	host.Size = UDim2.fromScale(1 / contentScale, 1 / contentScale)
 	host.Visible = true
-	host.ClipsDescendants = true
+	host.ClipsDescendants = self.hostClipsDescendants
 	self:_bindLegacySuppression(frame, host)
 	self:SyncOverlayState()
 

@@ -37,7 +37,10 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	modalStateKey = "QuestModal",
 	minSize = Vector2.new(760, 520),
 	maxSize = Vector2.new(1080, 720),
+	frameSize = UDim2.fromScale(0.76, 0.72),
 	useResponsiveUiScale = false,
+	frameClipsDescendants = false,
+	hostClipsDescendants = false,
 	createFrameIfMissing = true,
 	standalone = true,
 })
@@ -211,19 +214,8 @@ end
 
 local function prepareQuestFrame()
 	local frame = modalAdapter:GetFrame()
-	local host = frame and frame:FindFirstChild("ReactQuestHost")
 	if not frame then
 		return
-	end
-
-	frame.BackgroundTransparency = 1
-	frame.BorderSizePixel = 0
-	frame.ClipsDescendants = false
-	frame.Size = UDim2.fromScale(0.76, 0.72)
-	frame.ZIndex = 120
-	if host then
-		host.ZIndex = 140
-		host.ClipsDescendants = false
 	end
 
 	if watchedFrame ~= frame then

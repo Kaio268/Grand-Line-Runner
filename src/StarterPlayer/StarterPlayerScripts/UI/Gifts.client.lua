@@ -31,6 +31,8 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	maxSize = Vector2.new(760, 720),
 	frameSize = UDim2.fromScale(0.5, 0.66),
 	useResponsiveUiScale = false,
+	frameClipsDescendants = false,
+	hostClipsDescendants = false,
 	createFrameIfMissing = true,
 	standalone = true,
 })
@@ -45,25 +47,6 @@ rewardCount = math.max(rewardCount, 1)
 
 local destroyed = false
 local render
-
-local noClipGuarded = setmetatable({}, { __mode = "k" })
-local function keepUnclipped(inst)
-	if not inst then
-		return
-	end
-
-	inst.ClipsDescendants = false
-	if noClipGuarded[inst] then
-		return
-	end
-
-	noClipGuarded[inst] = true
-	inst:GetPropertyChangedSignal("ClipsDescendants"):Connect(function()
-		if inst.ClipsDescendants then
-			inst.ClipsDescendants = false
-		end
-	end)
-end
 
 local unregisterModal = ReactModalRegistry.Register("Gifts", {
 	toggle = function()
@@ -97,14 +80,6 @@ render = function()
 	if not host then
 		return
 	end
-
-	local frame = modalAdapter:GetFrame()
-	if frame then
-		frame.ZIndex = 120
-		keepUnclipped(frame)
-	end
-	host.ZIndex = 140
-	keepUnclipped(host)
 
 	root:render(ReactRoblox.createPortal(React.createElement(GiftsScreen, {
 		onClose = function()

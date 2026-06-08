@@ -81,6 +81,8 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	minSize = Vector2.new(960, 560),
 	maxSize = Vector2.new(1200, 720),
 	useResponsiveUiScale = false,
+	frameClipsDescendants = false,
+	hostClipsDescendants = false,
 	allowFallback = true,
 	createFrameIfMissing = true,
 	standalone = true,
@@ -964,25 +966,6 @@ fireClaimReward = function(rewardId)
 	end
 end
 
-local noClipGuarded = setmetatable({}, { __mode = "k" })
-local function keepUnclipped(inst)
-	if not inst then
-		return
-	end
-
-	inst.ClipsDescendants = false
-	if noClipGuarded[inst] then
-		return
-	end
-
-	noClipGuarded[inst] = true
-	inst:GetPropertyChangedSignal("ClipsDescendants"):Connect(function()
-		if inst.ClipsDescendants then
-			inst.ClipsDescendants = false
-		end
-	end)
-end
-
 local function render()
 	if destroyed then
 		return
@@ -990,14 +973,6 @@ local function render()
 
 	local host = modalAdapter:EnsureHost()
 	if host then
-		local frame = modalAdapter:GetFrame()
-		if frame then
-			frame.ZIndex = 120
-			keepUnclipped(frame)
-		end
-		host.ZIndex = 140
-		keepUnclipped(host)
-
 		modalAdapter:SetFallbackEnabled(false)
 		local isVisible = modalAdapter:IsVisible()
 		if not isVisible then
