@@ -53,6 +53,7 @@ do
 end
 
 ClientRuntime.Formatters = require(script.Parent:WaitForChild("AppClientFormatters"))
+ClientRuntime.NamiSellValueUpdater = require(script.Parent:WaitForChild("NamiSellValueUpdater"))
 local NamiDirectSell = require(script.Parent:WaitForChild("NamiDirectSell"))
 
 function ClientRuntime.findOptionalChild(parent, childName, className)
@@ -3597,6 +3598,24 @@ local function buildRenderData()
 	}
 end
 
+ClientRuntime.NamiSellValueContext = {
+	BuildEntry = buildEntry,
+	BuildRenderData = buildRenderData,
+	ClientRuntime = ClientRuntime,
+	CrewItemKind = CREW_ITEM_KIND,
+	ForEachInventoryState = function(callback)
+		if typeof(callback) ~= "function" then
+			return
+		end
+		for key, state in pairs(itemState) do
+			callback(key, state)
+		end
+	end,
+	GetSellValue = ClientRuntime.CrewInventoryFeedback.GetSellValue,
+	IsCrewItemKind = isCrewItemKind,
+}
+ClientRuntime.NamiSellValueUpdater.SetContext(ClientRuntime.NamiSellValueContext)
+
 local function hideLegacyInventory()
 	local hud = playerGui:FindFirstChild("HUD")
 	if not hud then
@@ -4200,6 +4219,7 @@ end
 
 render = function()
 	local data = buildRenderData()
+	ClientRuntime.NamiSellValueUpdater.UpdateFromRenderData(data)
 	UiModalState.SetOpen("InventoryModal", uiState.isOpen or ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen())
 	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, uiState.isOpen == true)
 
@@ -5027,6 +5047,8 @@ task.defer(scheduleRender)
 
 script.Destroying:Connect(function()
 	destroyed = true
+	ClientRuntime.NamiSellValueUpdater.ClearContext(ClientRuntime.NamiSellValueContext)
+	ClientRuntime.NamiSellValueContext = nil
 	UiModalState.SetOpen("InventoryModal", false)
 	if ClientRuntime.UnregisterInventoryModal then
 		ClientRuntime.UnregisterInventoryModal()

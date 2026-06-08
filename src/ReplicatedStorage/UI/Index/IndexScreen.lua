@@ -7,6 +7,7 @@ local Theme = require(script.Parent:WaitForChild("Theme"))
 local IndexData = require(script.Parent:WaitForChild("IndexData"))
 local IndexGrid = require(script.Parent:WaitForChild("Components"):WaitForChild("IndexGrid"))
 local RewardsPanel = require(script.Parent:WaitForChild("Components"):WaitForChild("RewardsPanel"))
+local CategorySidebar = require(script.Parent:WaitForChild("Components"):WaitForChild("CategorySidebar"))
 
 local e = React.createElement
 
@@ -269,170 +270,6 @@ local function tabButton(props)
 	})
 end
 
-local function categoryDropdown(props)
-	local categories = props.categories or {}
-	local active = props.activeCategory
-	local open, setOpen = React.useState(false)
-	local hovered, setHovered = React.useState(false)
-
-	local activeLabel = "Filter"
-	for _, category in ipairs(categories) do
-		if tostring(category.id) == tostring(active) then
-			activeLabel = tostring(category.label or "Filter")
-		end
-	end
-
-	local optionChildren = {
-		List = e("UIListLayout", {
-			FillDirection = Enum.FillDirection.Vertical,
-			Padding = UDim.new(0, 3),
-			SortOrder = Enum.SortOrder.LayoutOrder,
-		}),
-	}
-
-	for index, category in ipairs(categories) do
-		local isActive = tostring(category.id) == tostring(active)
-		optionChildren["Opt" .. tostring(category.id)] = e("TextButton", {
-			AutoButtonColor = false,
-			BackgroundColor3 = isActive and SHELL.GoldBase or SHELL.CardBg,
-			BackgroundTransparency = 0,
-			BorderSizePixel = 0,
-			LayoutOrder = index,
-			Size = UDim2.new(1, 0, 0, 26),
-			Text = "",
-			ZIndex = 44,
-			[React.Event.Activated] = function()
-				setOpen(false)
-				if props.onSelect then
-					props.onSelect(category.id)
-				end
-			end,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 8),
-			}),
-			Outline = e("UIStroke", {
-				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-				Color = Color3.fromRGB(0, 0, 0),
-				Thickness = 1.6,
-			}, isActive and {
-				Grad = e("UIGradient", {
-					Rotation = 90,
-					Color = ColorSequence.new(Color3.fromRGB(80, 80, 80), Color3.fromRGB(0, 0, 0)),
-				}),
-			} or nil),
-			Sheen = e("UIGradient", {
-				Rotation = 90,
-				Color = isActive
-						and ColorSequence.new(Color3.fromRGB(255, 250, 222), Color3.fromRGB(216, 168, 64))
-					or ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 200)),
-			}),
-			Title = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = BODY,
-				Size = UDim2.fromScale(1, 1),
-				Text = tostring(category.label or ""),
-				TextColor3 = isActive and Color3.new(1, 1, 1) or SHELL.TextMain,
-				TextSize = 14,
-				TextStrokeColor3 = SHELL.TextShadow,
-				TextStrokeTransparency = isActive and 0 or 0.4,
-				ZIndex = 45,
-			}),
-		})
-	end
-
-	return e("Frame", {
-		BackgroundTransparency = 1,
-		LayoutOrder = props.layoutOrder or 99,
-		Size = UDim2.fromOffset(126, 30),
-		ZIndex = 41,
-	}, {
-		Button = e("TextButton", {
-			AutoButtonColor = false,
-			BackgroundColor3 = hovered and Color3.fromRGB(26, 26, 30) or SHELL.CardBg,
-			BackgroundTransparency = 0,
-			BorderSizePixel = 0,
-			Size = UDim2.fromScale(1, 1),
-			Text = "",
-			ZIndex = 42,
-			[React.Event.MouseEnter] = function()
-				setHovered(true)
-			end,
-			[React.Event.MouseLeave] = function()
-				setHovered(false)
-			end,
-			[React.Event.Activated] = function()
-				setOpen(not open)
-			end,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 10),
-			}),
-			Outline = e("UIStroke", {
-				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-				Color = Color3.fromRGB(0, 0, 0),
-				Thickness = 1.8,
-			}),
-			Sheen = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 200)),
-			}),
-			Label = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = BODY,
-				Position = UDim2.fromOffset(10, 0),
-				Size = UDim2.new(1, -28, 1, 0),
-				Text = activeLabel,
-				TextColor3 = SHELL.TextMain,
-				TextSize = 13,
-				TextStrokeColor3 = SHELL.TextShadow,
-				TextStrokeTransparency = 0.4,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ZIndex = 43,
-			}),
-			Chevron = e("TextLabel", {
-				AnchorPoint = Vector2.new(1, 0.5),
-				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
-				Position = UDim2.new(1, -8, 0.5, 0),
-				Size = UDim2.fromOffset(14, 14),
-				Text = open and "^" or "v",
-				TextColor3 = SHELL.TextMain,
-				TextSize = 12,
-				ZIndex = 43,
-			}),
-		}),
-		Menu = open and e("Frame", {
-			BackgroundColor3 = SHELL.CardBg,
-			BackgroundTransparency = 0.04,
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(0, 34),
-			Size = UDim2.new(1, 0, 0, #categories * 29 + 8),
-			ZIndex = 43,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 10),
-			}),
-			Stroke = e("UIStroke", {
-				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-				Color = SHELL.GoldHighlight,
-				Thickness = 1.35,
-			}),
-			Pad = e("UIPadding", {
-				PaddingTop = UDim.new(0, 4),
-				PaddingBottom = UDim.new(0, 4),
-				PaddingLeft = UDim.new(0, 4),
-				PaddingRight = UDim.new(0, 4),
-			}),
-			Options = e("Frame", {
-				BackgroundTransparency = 1,
-				Size = UDim2.fromScale(1, 1),
-				ZIndex = 44,
-			}, optionChildren),
-		}) or nil,
-	})
-end
-
 local function header(props)
 	local tabChildren = {
 		List = e("UIListLayout", {
@@ -450,15 +287,6 @@ local function header(props)
 			layoutOrder = index,
 			onTabChange = props.onTabChange,
 			tab = tab,
-		})
-	end
-
-	if props.activeTab == "index" then
-		tabChildren.CategoryFilter = e(categoryDropdown, {
-			categories = props.categories,
-			activeCategory = props.activeCategory,
-			onSelect = props.onSelect,
-			layoutOrder = #(props.tabs or {}) + 1,
 		})
 	end
 
@@ -673,6 +501,7 @@ local function IndexScreen(props)
 	local mainX = 0
 	local mainWidth = 0
 	local backgroundImage = getBackgroundImageForTab(activeTab)
+	local indexSidebarOffset = Theme.Layout.SidebarWidth + Theme.Layout.ContentGap
 	local indexGridHeight = UDim2.new(1, 0, 1, -(contentTop + indexFooterHeight))
 	local fullPanelHeight = UDim2.new(1, 0, 1, -contentTop)
 	local indexCategoryPanels = {}
@@ -686,8 +515,8 @@ local function IndexScreen(props)
 
 			indexCategoryPanels["Category" .. categoryId] = e("Frame", {
 				BackgroundTransparency = 1,
-				Position = UDim2.fromOffset(0, 0),
-				Size = UDim2.fromScale(1, 1),
+				Position = UDim2.fromOffset(indexSidebarOffset, 0),
+				Size = UDim2.new(1, -indexSidebarOffset, 1, 0),
 				Visible = activeTab == "index" and activeCategory == categoryId,
 			}, {
 				Content = e(IndexGrid, {
@@ -701,8 +530,8 @@ local function IndexScreen(props)
 	if next(indexCategoryPanels) == nil then
 		indexCategoryPanels.ActiveCategory = e("Frame", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(0, 0),
-			Size = UDim2.fromScale(1, 1),
+			Position = UDim2.fromOffset(indexSidebarOffset, 0),
+			Size = UDim2.new(1, -indexSidebarOffset, 1, 0),
 			Visible = activeTab == "index",
 		}, {
 			Content = e(IndexGrid, {
@@ -711,6 +540,12 @@ local function IndexScreen(props)
 			}),
 		})
 	end
+
+	indexCategoryPanels.VariantSidebar = e(CategorySidebar, {
+		categories = categories,
+		activeCategory = activeCategory,
+		onSelect = handleCategorySelect,
+	})
 
 	return e("Frame", {
 		BackgroundColor3 = SHELL.MenuOverlay,

@@ -6,6 +6,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
+local NamiSellValueUpdater = require(script.Parent:WaitForChild("NamiSellValueUpdater"))
 
 local WipInstanceModalBridge = {}
 
@@ -286,12 +287,19 @@ function WipInstanceModalBridge.WatchGui(guiName, callback)
 end
 
 function WipInstanceModalBridge.BindNamiSellButtons(gui)
-	if not isScreenGui(gui) or boundSellGuis[gui] then
+	if not isScreenGui(gui) then
+		return gui
+	end
+
+	NamiSellValueUpdater.BindGui(gui)
+
+	if boundSellGuis[gui] then
 		return gui
 	end
 
 	local connections = {}
 	local function requestDirectCrewSell(source, mode)
+		NamiSellValueUpdater.RequestUpdate()
 		ReactModalRegistry.Close("NamiShop")
 		ReactModalRegistry.Open("Inventory", {
 			ActiveCategory = "CrewMembers",
