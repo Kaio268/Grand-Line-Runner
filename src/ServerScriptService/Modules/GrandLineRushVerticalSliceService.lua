@@ -631,6 +631,9 @@ local function cloneRewardData(reward)
 		DepthBand = reward.DepthBand,
 		DisplayName = reward.DisplayName,
 		Source = reward.Source,
+		CarryId = reward.CarryId,
+		CarryOrder = reward.CarryOrder,
+		SlotIndex = reward.SlotIndex,
 	}
 
 	if reward.RewardType == "Chest" then
@@ -1035,6 +1038,32 @@ local function removeCarryItem(player, runtime, slotIndexOrCarryId)
 	syncCarrySlotsToClient(player, runtime)
 	refreshHeldCarryVisualLayout(player)
 	return removed, nil
+end
+
+local function restoreRemovedCarryItem(player, runtime, removed)
+	if typeof(removed) ~= "table" then
+		return false, "invalid_removed_carry_item"
+	end
+
+	local slotIndex = math.floor(tonumber(removed.SlotIndex) or 0)
+	local slot = getCarrySlots(runtime)[slotIndex]
+	if not slot then
+		return false, "missing_carry_slot"
+	end
+	if typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
+		return false, "carry_slot_occupied"
+	end
+
+	slot.CarryId = removed.CarryId
+	slot.CarryOrder = removed.CarryOrder
+	slot.ItemType = removed.ItemType
+	slot.DisplayName = removed.DisplayName
+	slot.Data = cloneCarryData(removed.Data)
+	slot.DropInProgress = nil
+
+	syncCarrySlotsToClient(player, runtime)
+	refreshHeldCarryVisualLayout(player)
+	return true, nil
 end
 
 local function clearAllCarryItems(player, runtime, reason)
@@ -2800,17 +2829,6 @@ local function dropCarriedReward(player, options)
 	)
 
 	if slot.ItemType == "Chest" then
-		local dropped, dropReason = createDroppedWorldChest(player, droppedReward)
-		if not dropped then
-			slot.DropInProgress = nil
-			return finishDrop(resolveActionResponse(
-				player,
-				false,
-				nil,
-				tostring(dropReason or "dropped_chest_create_failed")
-			))
-		end
-
 		local removed, removeReason = removeCarryItem(player, runtime, slotKey)
 		if not removed then
 			slot.DropInProgress = nil
@@ -2821,6 +2839,26 @@ local function dropCarriedReward(player, options)
 				tostring(removeReason or "remove_carried_reward_failed")
 			))
 		end
+
+		local dropped, dropReason = createDroppedWorldChest(player, droppedReward)
+		if not dropped then
+			local restored, restoreReason = restoreRemovedCarryItem(player, runtime, removed)
+			if restored ~= true then
+				warn(string.format(
+					"[GrandLineRush] Failed to restore chest carry slot after dropped world chest failure player=%s carryId=%s reason=%s",
+					player and player.Name or "unknown",
+					tostring(removed.CarryId or ""),
+					tostring(restoreReason or "unknown")
+				))
+			end
+			return finishDrop(resolveActionResponse(
+				player,
+				false,
+				nil,
+				tostring(dropReason or "dropped_chest_create_failed")
+			))
+		end
+
 		notifyCarryDrop(player, dropReasonCode, {
 			Action = "DropCarriedChest",
 			ItemType = removed.ItemType,

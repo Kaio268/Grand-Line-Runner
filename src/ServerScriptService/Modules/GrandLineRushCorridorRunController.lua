@@ -4,7 +4,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CarriedRewardVisuals = require(Modules:WaitForChild("CarriedRewardVisuals"))
@@ -15,6 +14,7 @@ local ChestOverhead = require(Modules:WaitForChild("ChestOverhead"))
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
+local WorldDropPhysics = require(Modules:WaitForChild("Server"):WaitForChild("WorldDropPhysics"))
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
 local ChestRushService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushChestRushService"))
 
@@ -36,8 +36,7 @@ local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CorridorRunDebu
 local loggedExtractionTouchByPlayer = {}
 local BIOME_FOLDER_PATTERN = "^Biome%s*(%d+)$"
 local CHEST_OVERHEAD_ATTRIBUTES = ChestOverhead.Attribute
-local DROPPED_CHEST_FALL_HEIGHT = 6
-local DROPPED_CHEST_FALL_SECONDS = 0.35
+local DROPPED_CHEST_START_HEIGHT = 6
 
 local SUCCESS_COLOR = Color3.fromRGB(98, 255, 124)
 local ERROR_COLOR = Color3.fromRGB(255, 104, 104)
@@ -310,6 +309,10 @@ end
 local function getRewardObject(userId, objectKey)
 	local map = getRewardObjectMap(userId)
 	return map[tostring(objectKey or "spawned")]
+end
+
+local function getCarryObjectKeyFromValues(carryId, slotIndex)
+	return "carry_" .. tostring(carryId or slotIndex or "unknown")
 end
 
 local function setRewardObject(userId, objectKey, object)
@@ -886,6 +889,49 @@ local function clearCarryWeld(rootPart)
 	if weld and weld:IsA("WeldConstraint") then
 		weld:Destroy()
 	end
+end
+
+local function clearRewardCarryArtifacts(object)
+	if not object then
+		return
+	end
+
+	object:SetAttribute("CarryVisualOffset", nil)
+	object:SetAttribute(MOGU_BURROW_RAYCAST_IGNORE_ATTRIBUTE, nil)
+
+	for _, descendant in ipairs(object:GetDescendants()) do
+		local name = tostring(descendant.Name or "")
+		local isCarryNamed = name == "RewardCarryWeld" or string.find(name, "Carry", 1, true) ~= nil
+		if isCarryNamed
+			and (
+				descendant:IsA("WeldConstraint")
+				or descendant:IsA("AlignPosition")
+				or descendant:IsA("AlignOrientation")
+				or descendant:IsA("Attachment")
+				or descendant:IsA("BallSocketConstraint")
+				or descendant:IsA("HingeConstraint")
+				or descendant:IsA("RigidConstraint")
+				or descendant:IsA("RodConstraint")
+				or descendant:IsA("SpringConstraint")
+			)
+		then
+			descendant:Destroy()
+		end
+	end
+end
+
+local function applyDroppedChestPhysics(object, rootPart)
+	clearRewardCarryArtifacts(object)
+	WorldDropPhysics.ApplyDropPhysics(object, {
+		RootPart = rootPart,
+		ConfigurePart = function(part, isRoot)
+			part.Anchored = false
+			part.CanCollide = isRoot == true
+			part.CanTouch = isRoot == true
+			part.CanQuery = isRoot == true
+			part.Massless = isRoot ~= true
+		end,
+	})
 end
 
 local function getActiveHoroCarrierPart(player)
@@ -1866,18 +1912,22 @@ local function positionWorldChestObject(rewardObject, rewardState, options)
 		dropPosition = getPlayerDropFallbackPosition(options.Dropper)
 	end
 	if typeof(dropPosition) == "Vector3" then
-		local character = options.Dropper and options.Dropper.Character
-		local ignoreInstances = character and { character } or nil
-		local pivot = getDroppedRewardPivot(rewardObject, dropPosition, ignoreInstances)
 		if options.DroppedWorldChest == true then
-			local startPivot = pivot + Vector3.new(0, DROPPED_CHEST_FALL_HEIGHT, 0)
-			setObjectCFrame(rewardObject, startPivot)
+			local startPivot = WorldDropPhysics.PlaceAtDropStart(rewardObject, dropPosition, {
+				StartHeight = DROPPED_CHEST_START_HEIGHT,
+			})
+			local character = options.Dropper and options.Dropper.Character
 			return nil, {
-				DropFinalPivot = pivot,
+				DropPosition = dropPosition,
 				DropStartPivot = startPivot,
+				ExtraIgnore = character and { character } or nil,
+				StartFallBasePosition = dropPosition,
 			}
 		end
 
+		local character = options.Dropper and options.Dropper.Character
+		local ignoreInstances = character and { character } or nil
+		local pivot = getDroppedRewardPivot(rewardObject, dropPosition, ignoreInstances)
 		setObjectCFrame(rewardObject, pivot)
 	end
 
@@ -1901,8 +1951,7 @@ local function startDroppedChestAnimation(chestId, node, prompt)
 
 	local object = node.Object
 	local startPivot = node.DropStartPivot
-	local finalPivot = node.DropFinalPivot
-	if not object or not object.Parent or typeof(startPivot) ~= "CFrame" or typeof(finalPivot) ~= "CFrame" then
+	if not object or not object.Parent or typeof(startPivot) ~= "CFrame" then
 		if prompt and prompt.Parent then
 			prompt.Enabled = true
 		end
@@ -1927,29 +1976,21 @@ local function startDroppedChestAnimation(chestId, node, prompt)
 			return
 		end
 
-		local cframeValue = Instance.new("CFrameValue")
-		cframeValue.Value = startPivot
-		local connection = cframeValue:GetPropertyChangedSignal("Value"):Connect(function()
-			if canContinue() then
-				setObjectCFrame(object, cframeValue.Value)
-			end
-		end)
-
-		local tween = TweenService:Create(
-			cframeValue,
-			TweenInfo.new(DROPPED_CHEST_FALL_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{ Value = finalPivot }
-		)
-		tween:Play()
-		tween.Completed:Wait()
-		connection:Disconnect()
-		cframeValue:Destroy()
+		applyDroppedChestPhysics(object, node.RootPart)
+		WorldDropPhysics.SettleToGround(object, canContinue, {
+			AnchorAfterSettle = false,
+			CarryId = node.CarryId,
+			DropPosition = node.DropPosition,
+			ExtraIgnore = node.DropIgnoreInstances,
+			ReasonCode = "DroppedChest",
+			StartFallBasePosition = node.StartFallBasePosition,
+			StartPosition = startPivot.Position,
+		})
 
 		if not canContinue() then
 			return
 		end
 
-		setObjectCFrame(object, finalPivot)
 		node.DropAnimating = false
 		if prompt and prompt.Parent then
 			prompt.Enabled = true
@@ -2017,7 +2058,6 @@ local function createSharedChestNode(rewardFolder, rewardState, options)
 	local shouldAnimateDroppedChest = droppedWorldChest
 		and placementInfo ~= nil
 		and typeof(placementInfo.DropStartPivot) == "CFrame"
-		and typeof(placementInfo.DropFinalPivot) == "CFrame"
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "PickUpPrompt"
 	configureRewardPickupPrompt(prompt, rewardState)
@@ -2040,8 +2080,13 @@ local function createSharedChestNode(rewardFolder, rewardState, options)
 		SpawnedDuringChestRush = options.SpawnedDuringChestRush == true,
 		SpawnedByUserId = tonumber(options.SpawnedByUserId),
 		SpawnedByName = tostring(options.SpawnedByName or ""),
+		CarryId = tostring(rewardState.CarryId or ""),
+		CarryOrder = tonumber(rewardState.CarryOrder),
+		SlotIndex = tonumber(rewardState.SlotIndex),
+		DropPosition = placementInfo and placementInfo.DropPosition or nil,
+		DropIgnoreInstances = placementInfo and placementInfo.ExtraIgnore or nil,
 		DropStartPivot = shouldAnimateDroppedChest and placementInfo.DropStartPivot or nil,
-		DropFinalPivot = shouldAnimateDroppedChest and placementInfo.DropFinalPivot or nil,
+		StartFallBasePosition = placementInfo and placementInfo.StartFallBasePosition or nil,
 	}
 	sharedChestNodesById[chestId] = node
 	connectSharedChestPrompt(chestId, node, prompt)
@@ -2090,6 +2135,10 @@ local function spawnDroppedSharedChestNode(rewardFolder, player, rewardData)
 	end
 	if typeof(dropPosition) ~= "Vector3" then
 		return false, "drop_position_unavailable"
+	end
+
+	if player and player.UserId then
+		destroyRewardObject(player.UserId, getCarryObjectKeyFromValues(rewardData.CarryId, rewardData.SlotIndex))
 	end
 
 	local node = createSharedChestNode(rewardFolder, rewardData, {
@@ -2259,7 +2308,7 @@ local function buildRewardStateFromCarrySlot(slot)
 end
 
 local function getCarryObjectKey(slot)
-	return "carry_" .. tostring(slot.CarryId or slot.SlotIndex or "unknown")
+	return getCarryObjectKeyFromValues(slot and slot.CarryId, slot and slot.SlotIndex)
 end
 
 local function syncPlayerRewardObject(player, state, rewardFolder, carriedFolder, startPart, endPart)

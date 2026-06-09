@@ -9,6 +9,7 @@ local CarriedDropNotice = require(Modules:WaitForChild("CarriedDropNotice"))
 local CarriedRewardVisuals = require(Modules:WaitForChild("CarriedRewardVisuals"))
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
+local WorldDropPhysics = require(Modules:WaitForChild("Server"):WaitForChild("WorldDropPhysics"))
 local activeContext = nil
 local carrySlotAdapter = nil
 local worldPresentationAdapter = nil
@@ -597,24 +598,11 @@ local function startCarryPhysicsEnforcer(st, model, networkOwner)
 end
 
 local function setDropPhysics(model)
-	forEachPart(model, function(p)
-		p.Anchored = false
-		p.CanCollide = true
-		p.CanTouch = true
-		p.CanQuery = true
-		p.Massless = false
-		p.AssemblyLinearVelocity = Vector3.zero
-		p.AssemblyAngularVelocity = Vector3.zero
-		setNetworkOwner(p, nil)
-	end)
-end
-
-local function anchorAll(model)
-	forEachPart(model, function(p)
-		p.Anchored = true
-		p.AssemblyLinearVelocity = Vector3.zero
-		p.AssemblyAngularVelocity = Vector3.zero
-	end)
+	WorldDropPhysics.ApplyDropPhysics(model, {
+		ConfigurePart = function(p)
+			setNetworkOwner(p, nil)
+		end,
+	})
 end
 
 local function findModelPart(model)
@@ -827,49 +815,8 @@ local function computeHeadRotOnly(head)
 	return rot - rot.Position
 end
 
-local function isHumanoidModel(model)
-	return model and model:IsA("Model") and model:FindFirstChildOfClass("Humanoid") ~= nil
-end
-
-local function isValidDropGroundResult(result, selfModel)
-	if not result or not result.Instance or not result.Instance:IsA("BasePart") then
-		return false
-	end
-
-	local hitPart = result.Instance
-	if selfModel and hitPart:IsDescendantOf(selfModel) then
-		return false
-	end
-	local hitModel = hitPart:FindFirstAncestorOfClass("Model")
-	if isHumanoidModel(hitModel) then
-		return false
-	end
-	return hitPart.CanCollide == true
-end
-
-local function resolveGroundPosition(pos, ignore, selfModel)
-	if typeof(pos) ~= "Vector3" then
-		return nil, nil
-	end
-
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = ignore or {}
-	params.IgnoreWater = true
-	local origin = pos + Vector3.new(0, 6, 0)
-	local result = workspace:Raycast(origin, Vector3.new(0, -300, 0), params)
-	if isValidDropGroundResult(result, selfModel) then
-		return result.Position, result
-	end
-	return nil, result
-end
-
 local function computePivotBottomOnPoint(model, point, rotOnly)
-	local boxCF, boxSize = model:GetBoundingBox()
-	local offset = model:GetPivot():ToObjectSpace(boxCF)
-	local up = Vector3.yAxis
-	local desiredBoxCF = CFrame.new(point + up * (boxSize.Y / 2)) * rotOnly
-	return desiredBoxCF * offset:Inverse()
+	return WorldDropPhysics.ComputePivotBottomOnPoint(model, point, rotOnly)
 end
 
 local function describeDropSettleState(ctx, model, st, settleToken)
@@ -965,190 +912,24 @@ local function restoreDroppedCrewMemberPresentation(ctx, model, st, settleToken,
 	return true
 end
 
-local function appendSettleCandidate(candidates, position)
-	if typeof(position) ~= "Vector3" then
-		return
-	end
-
-	for _, existing in ipairs(candidates) do
-		if (existing - position).Magnitude < 0.05 then
-			return
-		end
-	end
-
-	candidates[#candidates + 1] = position
-end
-
-local function buildDropSettleIgnoreList(model, diagnostics)
-	local ignore = { model }
-	local extraIgnore = diagnostics.ExtraIgnore
-	if typeof(extraIgnore) == "table" then
-		for _, instance in ipairs(extraIgnore) do
-			if typeof(instance) == "Instance" then
-				ignore[#ignore + 1] = instance
-			end
-		end
-	end
-	return ignore
-end
-
-local function resolveDropSettleGround(model, diagnostics)
-	local candidates = {}
-	appendSettleCandidate(candidates, model:GetPivot().Position)
-	appendSettleCandidate(candidates, diagnostics.DropPosition)
-	appendSettleCandidate(candidates, diagnostics.StartFallBasePosition)
-	appendSettleCandidate(candidates, diagnostics.StartPosition)
-
-	local ignore = buildDropSettleIgnoreList(model, diagnostics)
-	local firstRejectedResult = nil
-	for index, candidate in ipairs(candidates) do
-		local ground, result = resolveGroundPosition(candidate, ignore, model)
-		if ground then
-			return ground, result, candidate, index
-		end
-		firstRejectedResult = firstRejectedResult or result
-	end
-
-	return nil, firstRejectedResult, nil, nil
-end
-
 local function settleToGroundThenAnchor(model, shouldContinue, diagnostics)
 	diagnostics = if typeof(diagnostics) == "table" then diagnostics else {}
-	local function canContinue()
-		if typeof(shouldContinue) ~= "function" then
-			return true
-		end
 
-		local ok, result = pcall(shouldContinue)
-		return ok and result ~= false
+	local result = WorldDropPhysics.SettleToGround(model, shouldContinue, {
+		AnchorAfterSettle = true,
+		CarryId = diagnostics.CarryId,
+		DescribeCancel = diagnostics.DescribeCancel,
+		DropPosition = diagnostics.DropPosition,
+		ExtraIgnore = diagnostics.ExtraIgnore,
+		ReasonCode = diagnostics.ReasonCode,
+		StartFallBasePosition = diagnostics.StartFallBasePosition,
+		StartPosition = diagnostics.StartPosition,
+		Trace = dropSettleTrace,
+	})
+	if result == "anchored" then
+		restoreDroppedCrewMemberPresentation(diagnostics.Context, model, diagnostics.State, diagnostics.SettleToken, diagnostics)
 	end
-
-	dropSettleTrace(
-		"begin reason=%s carryId=%s model=%s start=%s",
-		tostring(diagnostics.ReasonCode or "Unknown"),
-		tostring(diagnostics.CarryId or ""),
-		tostring(model and model.Name or "<nil>"),
-		tostring(model and model:GetPivot().Position or "")
-	)
-
-	if not canContinue() then
-		dropSettleTrace(
-			"exitBeforeLoop reason=%s carryId=%s model=%s state=%s",
-			tostring(diagnostics.ReasonCode or "Unknown"),
-			tostring(diagnostics.CarryId or ""),
-			tostring(model and model.Name or "<nil>"),
-			tostring(if typeof(diagnostics.DescribeCancel) == "function" then diagnostics.DescribeCancel() else "cancelled")
-		)
-		return "cancelled"
-	end
-
-	local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-	local t0 = os.clock()
-	while model.Parent and os.clock() - t0 < 2.5 do
-		if not canContinue() then
-			dropSettleTrace(
-				"exitDuringLoop reason=%s carryId=%s model=%s state=%s elapsed=%.2f",
-				tostring(diagnostics.ReasonCode or "Unknown"),
-				tostring(diagnostics.CarryId or ""),
-				tostring(model and model.Name or "<nil>"),
-				tostring(if typeof(diagnostics.DescribeCancel) == "function" then diagnostics.DescribeCancel() else "cancelled"),
-				os.clock() - t0
-			)
-			return "cancelled"
-		end
-
-		task.wait(0.08)
-		if not primary or not primary.Parent then
-			primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-		end
-		if primary then
-			local origin = primary.Position
-			local params = RaycastParams.new()
-			params.FilterType = Enum.RaycastFilterType.Exclude
-			params.FilterDescendantsInstances = { model }
-			local r = workspace:Raycast(origin, Vector3.new(0, -12, 0), params)
-			if r and (origin.Y - r.Position.Y) <= 1.2 then
-				break
-			end
-		end
-	end
-	if model.Parent and os.clock() - t0 >= 2.5 then
-		dropSettleTrace(
-			"timeoutFallback reason=%s carryId=%s model=%s pivot=%s",
-			tostring(diagnostics.ReasonCode or "Unknown"),
-			tostring(diagnostics.CarryId or ""),
-			tostring(model and model.Name or "<nil>"),
-			tostring(model:GetPivot().Position)
-		)
-	end
-	if not model.Parent then
-		dropSettleTrace(
-			"exitBeforeAnchor reason=%s carryId=%s model=%s state=model_unparented",
-			tostring(diagnostics.ReasonCode or "Unknown"),
-			tostring(diagnostics.CarryId or ""),
-			tostring(model and model.Name or "<nil>")
-		)
-		return "cancelled"
-	end
-	if not canContinue() then
-		dropSettleTrace(
-			"exitBeforeAnchor reason=%s carryId=%s model=%s state=%s",
-			tostring(diagnostics.ReasonCode or "Unknown"),
-			tostring(diagnostics.CarryId or ""),
-			tostring(model and model.Name or "<nil>"),
-			tostring(if typeof(diagnostics.DescribeCancel) == "function" then diagnostics.DescribeCancel() else "cancelled")
-		)
-		return "cancelled"
-	end
-	local rot = model:GetPivot()
-	local lv = rot.LookVector
-	local dir = Vector3.new(lv.X, 0, lv.Z)
-	if dir.Magnitude < 1e-4 then
-		dir = Vector3.new(0, 0, -1)
-	else
-		dir = dir.Unit
-	end
-	local rotOnly = CFrame.lookAt(Vector3.zero, dir, Vector3.yAxis)
-	rotOnly = rotOnly - rotOnly.Position
-	local ground, result, candidate, candidateIndex = resolveDropSettleGround(model, diagnostics)
-	if not ground then
-		dropSettleTrace(
-			"settleNoGround reason=%s carryId=%s model=%s pivot=%s rejectedHit=%s",
-			tostring(diagnostics.ReasonCode or "Unknown"),
-			tostring(diagnostics.CarryId or ""),
-			tostring(model and model.Name or "<nil>"),
-			tostring(model:GetPivot().Position),
-			tostring(result and result.Instance and result.Instance:GetFullName() or "")
-		)
-		return "no_ground"
-	end
-	local pivotTarget = computePivotBottomOnPoint(model, ground, rotOnly)
-	model:PivotTo(pivotTarget)
-	if not canContinue() then
-		dropSettleTrace(
-			"exitAfterPivot reason=%s carryId=%s model=%s state=%s pivot=%s",
-			tostring(diagnostics.ReasonCode or "Unknown"),
-			tostring(diagnostics.CarryId or ""),
-			tostring(model and model.Name or "<nil>"),
-			tostring(if typeof(diagnostics.DescribeCancel) == "function" then diagnostics.DescribeCancel() else "cancelled"),
-			tostring(model:GetPivot().Position)
-		)
-		return "cancelled"
-	end
-	anchorAll(model)
-	dropSettleTrace(
-		"anchorComplete reason=%s carryId=%s model=%s finalPivot=%s ground=%s candidate=%s candidateIndex=%s hit=%s",
-		tostring(diagnostics.ReasonCode or "Unknown"),
-		tostring(diagnostics.CarryId or ""),
-		tostring(model and model.Name or "<nil>"),
-		tostring(model:GetPivot().Position),
-		tostring(ground),
-		tostring(candidate),
-		tostring(candidateIndex or ""),
-		tostring(result and result.Instance and result.Instance:GetFullName() or "")
-	)
-	restoreDroppedCrewMemberPresentation(diagnostics.Context, model, diagnostics.State, diagnostics.SettleToken, diagnostics)
-	return "anchored"
+	return result
 end
 
 local function runDroppedCrewMemberSettle(ctx, model, st, settleToken, options, retryCount)
