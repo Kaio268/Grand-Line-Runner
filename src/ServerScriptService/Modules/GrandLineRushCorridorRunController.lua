@@ -1737,6 +1737,40 @@ local function getSharedChestDespawnSeconds(node, sharedConfig)
 	return math.max(0, configured or legacyFallback)
 end
 
+local function getSharedChestSpawnSource(options)
+	options = if typeof(options) == "table" then options else {}
+	local source = tostring(options.SpawnSource or "")
+	if source ~= "" then
+		return source
+	end
+	if options.DroppedWorldChest == true then
+		return "Dropped"
+	end
+	return "Normal"
+end
+
+local function applySharedChestMetadata(rewardObject, chestId, options)
+	if not rewardObject then
+		return
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	local spawnSource = getSharedChestSpawnSource(options)
+	rewardObject:SetAttribute("RewardType", "Chest")
+	rewardObject:SetAttribute("SharedWorldChest", true)
+	rewardObject:SetAttribute("SharedChestId", chestId)
+	rewardObject:SetAttribute("SharedChestSpawnSource", spawnSource)
+	rewardObject:SetAttribute("SharedChestSpawnedDuringChestRush", options.SpawnedDuringChestRush == true)
+	local spawnedByUserId = tonumber(options.SpawnedByUserId)
+	rewardObject:SetAttribute(
+		"SharedChestSpawnedByUserId",
+		if spawnedByUserId then math.floor(spawnedByUserId) else nil
+	)
+	local spawnedByName = tostring(options.SpawnedByName or "")
+	rewardObject:SetAttribute("SharedChestSpawnedByName", if spawnedByName ~= "" then spawnedByName else nil)
+	rewardObject:SetAttribute("DroppedWorldChest", if options.DroppedWorldChest == true then true else nil)
+end
+
 local function despawnExpiredSharedChests(now, sharedConfig)
 	for chestId, node in pairs(sharedChestNodesById) do
 		local object = node and node.Object
@@ -1962,12 +1996,7 @@ local function createSharedChestNode(rewardFolder, rewardState, options)
 	local namePrefix = tostring(options.NamePrefix or "SharedChest")
 	local rewardObject = createRewardInstance(rewardState)
 	rewardObject.Name = string.format("%s_%s", namePrefix, chestId)
-	rewardObject:SetAttribute("RewardType", "Chest")
-	rewardObject:SetAttribute("SharedWorldChest", true)
-	rewardObject:SetAttribute("SharedChestId", chestId)
-	if droppedWorldChest then
-		rewardObject:SetAttribute("DroppedWorldChest", true)
-	end
+	applySharedChestMetadata(rewardObject, chestId, options)
 	rewardObject.Parent = rewardFolder
 
 	local rootPart = getObjectRootPart(rewardObject)
@@ -1975,12 +2004,7 @@ local function createSharedChestNode(rewardFolder, rewardState, options)
 		rewardObject:Destroy()
 		rewardObject = createDefaultRewardPart(rewardState)
 		rewardObject.Name = string.format("%s_%s", namePrefix, chestId)
-		rewardObject:SetAttribute("RewardType", "Chest")
-		rewardObject:SetAttribute("SharedWorldChest", true)
-		rewardObject:SetAttribute("SharedChestId", chestId)
-		if droppedWorldChest then
-			rewardObject:SetAttribute("DroppedWorldChest", true)
-		end
+		applySharedChestMetadata(rewardObject, chestId, options)
 		rewardObject.Parent = rewardFolder
 		rootPart = rewardObject
 	end
@@ -2012,6 +2036,10 @@ local function createSharedChestNode(rewardFolder, rewardState, options)
 		SpawnedAt = os.clock(),
 		DespawnSeconds = despawnSeconds,
 		DroppedWorldChest = droppedWorldChest,
+		SpawnSource = getSharedChestSpawnSource(options),
+		SpawnedDuringChestRush = options.SpawnedDuringChestRush == true,
+		SpawnedByUserId = tonumber(options.SpawnedByUserId),
+		SpawnedByName = tostring(options.SpawnedByName or ""),
 		DropStartPivot = shouldAnimateDroppedChest and placementInfo.DropStartPivot or nil,
 		DropFinalPivot = shouldAnimateDroppedChest and placementInfo.DropFinalPivot or nil,
 	}
@@ -2037,9 +2065,12 @@ local function spawnSharedChestNode(rewardFolder, _carriedFolder, activePlayerCo
 		SharedWorldChest = true,
 	})
 	rewardState.DisplayName = string.format("%s Chest", tostring(rewardState.Tier or "Wooden"))
+	local spawnedDuringChestRush = ChestRushService.IsActive()
 
 	local node = createSharedChestNode(rewardFolder, rewardState, {
 		SpawnContext = spawnContext,
+		SpawnSource = if spawnedDuringChestRush then "ChestRush" else "Normal",
+		SpawnedDuringChestRush = spawnedDuringChestRush,
 	})
 	if node then
 		recordSharedChestTier(rewardState.Tier)
@@ -2064,8 +2095,11 @@ local function spawnDroppedSharedChestNode(rewardFolder, player, rewardData)
 	local node = createSharedChestNode(rewardFolder, rewardData, {
 		NamePrefix = "DroppedSharedChest",
 		DroppedWorldChest = true,
+		SpawnSource = "Dropped",
 		Dropper = player,
 		DropPosition = dropPosition,
+		SpawnedByUserId = player and player.UserId or nil,
+		SpawnedByName = player and player.Name or "",
 	})
 	if not node then
 		return false, "dropped_chest_create_failed"
@@ -2661,10 +2695,14 @@ function Controller.SpawnSharedChestInFrontOfPlayer(player)
 	local rewardObject = createRewardInstance(rewardState)
 	sharedChestSequence += 1
 	local chestId = tostring(sharedChestSequence)
+	local metadataOptions = {
+		SpawnSource = "AdminDebug",
+		SpawnedByUserId = player.UserId,
+		SpawnedByName = player.Name,
+		SpawnedDuringChestRush = ChestRushService.IsActive(),
+	}
 	rewardObject.Name = string.format("SharedChestDebug_%s", chestId)
-	rewardObject:SetAttribute("RewardType", "Chest")
-	rewardObject:SetAttribute("SharedWorldChest", true)
-	rewardObject:SetAttribute("SharedChestId", chestId)
+	applySharedChestMetadata(rewardObject, chestId, metadataOptions)
 	rewardObject.Parent = rewardFolder
 
 	local rootPart = getObjectRootPart(rewardObject)
@@ -2676,6 +2714,9 @@ function Controller.SpawnSharedChestInFrontOfPlayer(player)
 	setObjectCFrame(rewardObject, root.CFrame * CFrame.new(0, 1.5, -10))
 
 	applyChestOverheadState(rewardObject, rewardState)
+	local sharedConfig = Economy.VerticalSlice.WorldRun.SharedChests or {}
+	local despawnSeconds = getSharedChestDespawnSeconds({}, sharedConfig)
+	applyChestDespawnAttributes(rewardObject, despawnSeconds, false)
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "PickUpPrompt"
@@ -2689,6 +2730,13 @@ function Controller.SpawnSharedChestInFrontOfPlayer(player)
 		RewardState = rewardState,
 		SpawnPart = nil,
 		Claimed = false,
+		SpawnedAt = os.clock(),
+		DespawnSeconds = despawnSeconds,
+		DroppedWorldChest = false,
+		SpawnSource = "AdminDebug",
+		SpawnedDuringChestRush = metadataOptions.SpawnedDuringChestRush == true,
+		SpawnedByUserId = player.UserId,
+		SpawnedByName = player.Name,
 	}
 	sharedChestNodesById[chestId] = node
 
@@ -2955,6 +3003,122 @@ function Controller.TryClaimRewardNearPosition(player, worldPosition, carrierPar
 		SharedChestId = tostring(bestNode.Id or ""),
 		Distance = bestDistance,
 	}
+end
+
+local function incrementSnapshotCount(counts, key, amount)
+	local normalizedKey = tostring(key or "")
+	if normalizedKey == "" then
+		normalizedKey = "Unknown"
+	end
+	counts[normalizedKey] = (tonumber(counts[normalizedKey]) or 0) + (amount or 1)
+end
+
+local function appendSnapshotDetail(details, maxDetails, detail)
+	if #details >= maxDetails then
+		return
+	end
+	details[#details + 1] = detail
+end
+
+local function getNodeSpawnSource(node)
+	local source = tostring(node and node.SpawnSource or "")
+	if source ~= "" then
+		return source
+	end
+	if node and node.DroppedWorldChest == true then
+		return "Dropped"
+	end
+	if node and node.SpawnedDuringChestRush == true then
+		return "ChestRush"
+	end
+	if node and node.SpawnPart == nil then
+		return "AdminDebug"
+	end
+	return "Normal"
+end
+
+function Controller.GetSharedChestSnapshot(options)
+	options = if typeof(options) == "table" then options else {}
+	local maxDetails = math.max(0, math.floor(tonumber(options.MaxDetails) or 60))
+	local now = os.clock()
+	local sharedConfig = Economy.VerticalSlice.WorldRun.SharedChests or {}
+	local activePlayerCount = getActiveSharedChestPlayerCount()
+	local baseMaxActive = getSharedChestMaxActive(sharedConfig, activePlayerCount)
+	local baseSpawnInterval = getSharedChestSpawnInterval(sharedConfig, activePlayerCount)
+	local maxActive, spawnInterval, chestRushActive = applyChestRushSpawnModifiers(baseMaxActive, baseSpawnInterval)
+	local nextSpawnInSeconds = if nextSharedChestRespawnAt > 0
+		then math.max(0, nextSharedChestRespawnAt - now)
+		else 0
+	local snapshot = {
+		Total = 0,
+		WorldAvailableCount = 0,
+		Claimed = 0,
+		Spawned = 0,
+		Dropped = 0,
+		ByTier = {},
+		ByDepthBand = {},
+		BySource = {},
+		ByStatus = {},
+		Details = {},
+		ActivePlayerCount = activePlayerCount,
+		BaseMaxActive = baseMaxActive,
+		MaxActive = maxActive,
+		BaseSpawnIntervalSeconds = baseSpawnInterval,
+		SpawnIntervalSeconds = spawnInterval,
+		NextSpawnInSeconds = nextSpawnInSeconds,
+		ChestRushActive = chestRushActive == true,
+		NonGoldStreak = sharedChestNonGoldStreak,
+	}
+
+	for chestId, node in pairs(sharedChestNodesById) do
+		if node and node.Object and node.Object.Parent then
+			local rewardState = if typeof(node.RewardState) == "table" then node.RewardState else {}
+			local tier = tostring(rewardState.Tier or "Unknown")
+			local depthBand = tostring(rewardState.DepthBand or "Unknown")
+			local source = getNodeSpawnSource(node)
+			local status = if node.Claimed == true then "Claimed" elseif node.DroppedWorldChest == true then "Dropped" else "Spawned"
+			local spawnedAt = tonumber(node.SpawnedAt) or now
+			local despawnSeconds = getSharedChestDespawnSeconds(node, sharedConfig)
+			local remainingSeconds = if despawnSeconds > 0 then math.max(0, despawnSeconds - (now - spawnedAt)) else 0
+
+			snapshot.Total += 1
+			if status == "Claimed" then
+				snapshot.Claimed += 1
+			else
+				snapshot.WorldAvailableCount += 1
+				if status == "Dropped" then
+					snapshot.Dropped += 1
+				else
+					snapshot.Spawned += 1
+				end
+			end
+
+			incrementSnapshotCount(snapshot.ByTier, tier)
+			incrementSnapshotCount(snapshot.ByDepthBand, depthBand)
+			incrementSnapshotCount(snapshot.BySource, source)
+			incrementSnapshotCount(snapshot.ByStatus, status)
+
+			appendSnapshotDetail(snapshot.Details, maxDetails, {
+				Kind = "SharedChest",
+				RewardType = "Chest",
+				Status = status,
+				Source = source,
+				ChestId = tostring(chestId),
+				DisplayName = tostring(rewardState.DisplayName or string.format("%s Chest", tier)),
+				Tier = tier,
+				DepthBand = depthBand,
+				SpawnedDuringChestRush = node.SpawnedDuringChestRush == true,
+				SpawnedByUserId = tonumber(node.SpawnedByUserId) or 0,
+				SpawnedByName = tostring(node.SpawnedByName or ""),
+				AgeSeconds = math.max(0, math.floor(now - spawnedAt)),
+				TimeRemainingSeconds = math.max(0, math.floor(remainingSeconds)),
+				WorldPath = node.Object:GetFullName(),
+				SpawnPartPath = if node.SpawnPart then node.SpawnPart:GetFullName() else "",
+			})
+		end
+	end
+
+	return snapshot
 end
 
 return Controller

@@ -2195,7 +2195,8 @@ function Service.FailRun(player, reason)
 	return resolveActionResponse(player, true, runtime.ResolutionText)
 end
 
-local function startRun(player, rewardType, depthBand)
+local function startRun(player, rewardType, depthBand, options)
+	options = if typeof(options) == "table" then options else {}
 	local restartLocked = resolveRestartLockedResponse(player, "starting a run")
 	if restartLocked ~= nil then
 		return restartLocked
@@ -2219,6 +2220,9 @@ local function startRun(player, rewardType, depthBand)
 	runtime.InRun = true
 	runtime.DepthBand = depthBand or Economy.VerticalSlice.DefaultDepthBand
 	runtime.RunSequence += 1
+	local spawnSource = tostring(options.SpawnSource or options.Source or "PrivateRun")
+	local spawnedByUserId = tonumber(options.SpawnedByUserId)
+	local spawnedByName = tostring(options.SpawnedByName or "")
 
 	if rewardType == "Crew" then
 		local crewReward = chooseCrewReward(runtime.DepthBand)
@@ -2231,12 +2235,20 @@ local function startRun(player, rewardType, depthBand)
 			Rarity = crewReward.Rarity,
 			CanonicalRarity = crewReward.CanonicalRarity,
 			DepthBand = runtime.DepthBand,
+			Source = spawnSource,
+			SpawnSource = spawnSource,
+			SpawnedByUserId = spawnedByUserId,
+			SpawnedByName = spawnedByName,
 		}
 	else
 		runtime.SpawnedReward = {
 			RewardType = "Chest",
 			Tier = chooseChestTier(runtime.DepthBand),
 			DepthBand = runtime.DepthBand,
+			Source = spawnSource,
+			SpawnSource = spawnSource,
+			SpawnedByUserId = spawnedByUserId,
+			SpawnedByName = spawnedByName,
 		}
 	end
 
@@ -3948,17 +3960,138 @@ function Service.GetState(player, options)
 	return buildState(player, options)
 end
 
+function Service.GetCorridorRuntimeSnapshot(options)
+	options = if typeof(options) == "table" then options else {}
+	local maxDetails = math.max(0, math.floor(tonumber(options.MaxDetails) or 60))
+	local snapshot = {
+		PlayersWithRuntime = 0,
+		WorldAvailableCount = 0,
+		Spawned = {
+			Total = 0,
+			Chests = 0,
+			Crewmates = 0,
+			ByType = {},
+			ByTier = {},
+			ByRarity = {},
+			ByVariant = {},
+			BySource = {},
+		},
+		Carried = {
+			Total = 0,
+			Chests = 0,
+			Crewmates = 0,
+			ByType = {},
+			ByTier = {},
+			ByRarity = {},
+			ByVariant = {},
+			BySource = {},
+		},
+		Details = {},
+	}
+
+	local function incrementCount(counts, key, amount)
+		local normalizedKey = tostring(key or "")
+		if normalizedKey == "" then
+			normalizedKey = "Unknown"
+		end
+		counts[normalizedKey] = (tonumber(counts[normalizedKey]) or 0) + (amount or 1)
+	end
+
+	local function appendDetail(detail)
+		if #snapshot.Details >= maxDetails then
+			return
+		end
+		snapshot.Details[#snapshot.Details + 1] = detail
+	end
+
+	local function countReward(bucket, reward)
+		local rewardType = tostring(reward and reward.RewardType or "")
+		if rewardType == "" then
+			rewardType = "Unknown"
+		elseif rewardType == "CrewMember" then
+			rewardType = "Crew"
+		end
+
+		bucket.Total += 1
+		incrementCount(bucket.ByType, rewardType)
+		if rewardType == "Chest" then
+			bucket.Chests += 1
+			incrementCount(bucket.ByTier, reward and reward.Tier or "Unknown")
+		elseif rewardType == "Crew" then
+			bucket.Crewmates += 1
+			incrementCount(bucket.ByRarity, reward and reward.Rarity or "Unknown")
+			incrementCount(bucket.ByVariant, reward and reward.Variant or "Normal")
+		end
+		incrementCount(bucket.BySource, reward and (reward.SpawnSource or reward.Source) or "Unknown")
+	end
+
+	for player, runtime in pairs(runtimeByPlayer) do
+		if player and player.Parent == Players and typeof(runtime) == "table" then
+			snapshot.PlayersWithRuntime += 1
+
+			local spawnedReward = sanitizeReward(runtime.SpawnedReward)
+			if spawnedReward then
+				snapshot.WorldAvailableCount += 1
+				countReward(snapshot.Spawned, spawnedReward)
+				appendDetail({
+					Kind = "LegacyRunReward",
+					RewardType = tostring(spawnedReward.RewardType or "Unknown"),
+					Status = "Spawned",
+					Source = tostring(spawnedReward.SpawnSource or spawnedReward.Source or "PrivateRun"),
+					DisplayName = tostring(spawnedReward.DisplayName or "Reward"),
+					Tier = tostring(spawnedReward.Tier or ""),
+					DepthBand = tostring(spawnedReward.DepthBand or ""),
+					Rarity = tostring(spawnedReward.Rarity or ""),
+					Variant = tostring(spawnedReward.Variant or ""),
+					CrewMemberId = tostring(spawnedReward.CrewMemberId or ""),
+					OwnerUserId = player.UserId,
+					OwnerName = player.Name,
+					SpawnedByUserId = tonumber(spawnedReward.SpawnedByUserId) or 0,
+					SpawnedByName = tostring(spawnedReward.SpawnedByName or ""),
+				})
+			end
+
+			for _, slot in ipairs(getCarrySlots(runtime)) do
+				if typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
+					local carriedReward = buildLegacyRewardFromCarrySlot(slot)
+					if carriedReward then
+						countReward(snapshot.Carried, carriedReward)
+						appendDetail({
+							Kind = "CarrySlot",
+							RewardType = tostring(carriedReward.RewardType or "Unknown"),
+							Status = "Carried",
+							Source = tostring(carriedReward.SpawnSource or carriedReward.Source or "Carried"),
+							DisplayName = tostring(carriedReward.DisplayName or slot.DisplayName or "Carried Reward"),
+							Tier = tostring(carriedReward.Tier or ""),
+							DepthBand = tostring(carriedReward.DepthBand or ""),
+							Rarity = tostring(carriedReward.Rarity or ""),
+							Variant = tostring(carriedReward.Variant or ""),
+							CrewMemberId = tostring(carriedReward.CrewMemberId or ""),
+							OwnerUserId = player.UserId,
+							OwnerName = player.Name,
+							CarryId = tostring(slot.CarryId or ""),
+							SlotIndex = tonumber(slot.SlotIndex) or 0,
+						})
+					end
+				end
+			end
+		end
+	end
+
+	return snapshot
+end
+
 function Service.PushState(player, options)
 	pushState(player, options)
 end
 
-function Service.StartRun(player, rewardType, depthBand)
+function Service.StartRun(player, rewardType, depthBand, options)
 	local ready, errorResponse = preparePlayerState(player)
 	if not ready then
 		return errorResponse
 	end
 
-	return startRun(player, rewardType, depthBand)
+	return startRun(player, rewardType, depthBand, options)
 end
 
 function Service.CreateChestRewardData(depthBand, options)

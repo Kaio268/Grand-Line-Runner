@@ -1199,6 +1199,7 @@ local function buildDashboard()
 	local adminRosterFunction = safeWait(ReplicatedStorage, "AdminRosterRequest")
 	local adminTesterRoleFunction = safeWait(ReplicatedStorage, "AdminTesterRoleRequest")
 	local adminConsoleActionFunction = safeWait(ReplicatedStorage, "AdminConsoleActionRequest")
+	local adminCorridorRewardsFunction = safeWait(ReplicatedStorage, "AdminCorridorRewardsRequest")
 	local adminRosterUpdatedEvent = safeWait(ReplicatedStorage, "AdminRosterUpdated")
 	local currentTab = "Commands"
 	local tabButtons = {}
@@ -1303,7 +1304,7 @@ local function buildDashboard()
 		TextSize = 28,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Position = UDim2.fromOffset(72, 8),
-		Size = UDim2.new(1, -650, 0, 32),
+		Size = UDim2.new(1, -730, 0, 32),
 		Parent = header,
 	})
 
@@ -1316,7 +1317,7 @@ local function buildDashboard()
 		TextSize = 15,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Position = UDim2.fromOffset(73, 42),
-		Size = UDim2.new(1, -650, 0, 22),
+		Size = UDim2.new(1, -730, 0, 22),
 		Parent = header,
 	})
 
@@ -1340,8 +1341,8 @@ local function buildDashboard()
 		Name = "TopTabs",
 		BackgroundColor3 = Color3.fromRGB(7, 17, 36),
 		BorderSizePixel = 0,
-		Position = UDim2.new(1, -558, 0, 18),
-		Size = UDim2.fromOffset(482, 38),
+		Position = UDim2.new(1, -650, 0, 18),
+		Size = UDim2.fromOffset(574, 38),
 		Parent = header,
 	})
 	addCorner(tabBar, 14)
@@ -1429,6 +1430,21 @@ local function buildDashboard()
 	})
 	addCorner(tabButtons.Audit, 10)
 
+	tabButtons.Rewards = create("TextButton", {
+		Name = "RewardsTab",
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.PanelRaised,
+		BorderSizePixel = 0,
+		Font = FONT,
+		LayoutOrder = 6,
+		Text = "Rewards",
+		TextColor3 = COLORS.Text,
+		TextSize = 11,
+		Size = UDim2.fromOffset(86, 30),
+		Parent = tabBar,
+	})
+	addCorner(tabButtons.Rewards, 10)
+
 	local content = create("Frame", {
 		Name = "Content",
 		BackgroundTransparency = 1,
@@ -1450,6 +1466,101 @@ local function buildDashboard()
 		Size = UDim2.fromScale(1, 1),
 		Visible = false,
 		Parent = content,
+	})
+
+	local rewardsView = create("Frame", {
+		Name = "CorridorRewardsView",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		Visible = false,
+		Parent = content,
+	})
+
+	local rewardsHeader = create("Frame", {
+		Name = "RewardsHeader",
+		BackgroundColor3 = COLORS.Panel,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 54),
+		Parent = rewardsView,
+	})
+	addCorner(rewardsHeader, 18)
+	addStroke(rewardsHeader, COLORS.BorderSoft, 1, 0.2)
+
+	local rewardsTitleLabel = create("TextLabel", {
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		Text = "Corridor Rewards",
+		TextColor3 = COLORS.Text,
+		TextSize = 22,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(18, 8),
+		Size = UDim2.fromOffset(300, 28),
+		Parent = rewardsHeader,
+	})
+
+	local rewardsUpdatedLabel = create("TextLabel", {
+		Name = "RewardsUpdated",
+		BackgroundTransparency = 1,
+		Font = BODY_FONT,
+		Text = "Waiting for snapshot...",
+		TextColor3 = COLORS.Muted,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(19, 34),
+		Size = UDim2.new(1, -340, 0, 16),
+		Parent = rewardsHeader,
+	})
+
+	local rewardsBackButton = create("TextButton", {
+		Name = "BackRewards",
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.PanelRaised,
+		BorderSizePixel = 0,
+		Font = FONT,
+		Text = "Back",
+		TextColor3 = COLORS.Text,
+		TextSize = 13,
+		Position = UDim2.new(1, -238, 0, 10),
+		Size = UDim2.fromOffset(100, 34),
+		Visible = false,
+		Parent = rewardsHeader,
+	})
+	addCorner(rewardsBackButton, 12)
+	addStroke(rewardsBackButton, COLORS.BorderSoft, 1, 0.2)
+
+	local rewardsRefreshButton = create("TextButton", {
+		Name = "RefreshRewards",
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.PanelRaised,
+		BorderSizePixel = 0,
+		Font = FONT,
+		Text = "Refresh",
+		TextColor3 = COLORS.Text,
+		TextSize = 13,
+		Position = UDim2.new(1, -126, 0, 10),
+		Size = UDim2.fromOffset(108, 34),
+		Parent = rewardsHeader,
+	})
+	addCorner(rewardsRefreshButton, 12)
+	addStroke(rewardsRefreshButton, COLORS.BorderSoft, 1, 0.2)
+
+	local rewardsScroll = create("ScrollingFrame", {
+		Name = "RewardsScroll",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		CanvasSize = UDim2.fromOffset(0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 6,
+		ScrollBarImageColor3 = COLORS.Gold,
+		Position = UDim2.fromOffset(0, 66),
+		Size = UDim2.new(1, 0, 1, -66),
+		Parent = rewardsView,
+	})
+	addPadding(rewardsScroll, 0, 0, 8, 10)
+	local rewardsLayout = create("UIListLayout", {
+		Padding = UDim.new(0, 12),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = rewardsScroll,
 	})
 
 	local leftPane = create("Frame", {
@@ -1872,9 +1983,16 @@ local function buildDashboard()
 	local lastRosterRefresh = 0
 	local lastRosterPayload = nil
 	local rosterRefreshQueued = false
+	local rewardsLoading = false
+	local lastRewardsRefresh = 0
+	local lastRewardsPayload = nil
+	local rewardsAutoRefreshToken = 0
+	local rewardsDetailMode = "Overview"
 	local renderCommandList
 	local renderRoster
+	local renderRewards
 	local requestRoster
+	local requestRewards
 	local requestConsoleAction
 	local requestTesterRoleChange
 
@@ -1989,6 +2107,758 @@ local function buildDashboard()
 		return COLORS.Green
 	end
 
+	local function readSnapshotCount(value)
+		return math.max(0, math.floor(tonumber(value) or 0))
+	end
+
+	local function formatSnapshotNumber(value)
+		local n = readSnapshotCount(value)
+		if n >= 1000 then
+			local text = tostring(n)
+			local result = ""
+			while #text > 3 do
+				result = "," .. text:sub(-3) .. result
+				text = text:sub(1, -4)
+			end
+			return text .. result
+		end
+		return tostring(n)
+	end
+
+	local function clearRewardsBody()
+		for _, child in ipairs(rewardsScroll:GetChildren()) do
+			if child ~= rewardsLayout and not child:IsA("UIPadding") then
+				child:Destroy()
+			end
+		end
+	end
+
+	local function orderedCountItems(counts, preferredOrder, limit)
+		local items = {}
+		local used = {}
+		if typeof(preferredOrder) == "table" then
+			for _, key in ipairs(preferredOrder) do
+				local value = readSnapshotCount(counts and counts[key])
+				if value > 0 then
+					items[#items + 1] = {
+						Key = tostring(key),
+						Value = value,
+					}
+					used[tostring(key)] = true
+				end
+			end
+		end
+		if typeof(counts) == "table" then
+			local rest = {}
+			for key, value in pairs(counts) do
+				local keyText = tostring(key)
+				if used[keyText] ~= true then
+					local count = readSnapshotCount(value)
+					if count > 0 then
+						rest[#rest + 1] = {
+							Key = keyText,
+							Value = count,
+						}
+					end
+				end
+			end
+			table.sort(rest, function(a, b)
+				if a.Value == b.Value then
+					return a.Key < b.Key
+				end
+				return a.Value > b.Value
+			end)
+			for _, item in ipairs(rest) do
+				items[#items + 1] = item
+			end
+		end
+		local maxItems = math.max(1, math.floor(tonumber(limit) or 8))
+		while #items > maxItems do
+			table.remove(items)
+		end
+		return items
+	end
+
+	local function formatSnapshotSeconds(value)
+		local seconds = tonumber(value)
+		if not seconds then
+			return "n/a"
+		end
+		seconds = math.max(0, math.floor(seconds))
+		if seconds >= 60 then
+			return ("%dm %02ds"):format(math.floor(seconds / 60), seconds % 60)
+		end
+		return ("%ds"):format(seconds)
+	end
+
+	local function incrementRewardsCount(counts, key, amount)
+		local normalizedKey = cleanSingleLine(key, 48)
+		if normalizedKey == "" then
+			normalizedKey = "Unknown"
+		end
+		counts[normalizedKey] = (tonumber(counts[normalizedKey]) or 0) + (amount or 1)
+	end
+
+	local function makeRewardsMetricCard(parent, title, value, subtitle, accentColor, order, onActivated, footer)
+		local cardProps = {
+			Name = "Metric",
+			BackgroundColor3 = COLORS.Panel,
+			BorderSizePixel = 0,
+			LayoutOrder = order,
+			Parent = parent,
+		}
+		if onActivated then
+			cardProps.AutoButtonColor = true
+			cardProps.Text = ""
+		end
+		local card = create(if onActivated then "TextButton" else "Frame", cardProps)
+		addCorner(card, 14)
+		addStroke(card, accentColor or COLORS.BorderSoft, 1, 0.25)
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = BODY_FONT,
+			Text = title,
+			TextColor3 = COLORS.Muted,
+			TextSize = 11,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(12, 9),
+			Size = UDim2.new(1, -24, 0, 16),
+			Parent = card,
+		})
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBlack,
+			Text = tostring(value or ""),
+			TextColor3 = accentColor or COLORS.Text,
+			TextSize = if onActivated then 25 else 24,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(12, 27),
+			Size = UDim2.new(1, -24, 0, 28),
+			Parent = card,
+		})
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = BODY_FONT,
+			Text = subtitle,
+			TextColor3 = COLORS.Faint,
+			TextSize = 10,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(12, 56),
+			Size = UDim2.new(1, -24, 0, 14),
+			Parent = card,
+		})
+		if footer and footer ~= "" then
+			create("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = FONT,
+				Text = footer,
+				TextColor3 = accentColor or COLORS.Gold,
+				TextSize = 11,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Position = UDim2.fromOffset(12, 77),
+				Size = UDim2.new(1, -24, 0, 16),
+				Parent = card,
+			})
+		end
+		if onActivated then
+			card.Activated:Connect(function()
+				pulseButton(card)
+				onActivated()
+			end)
+		end
+		return card
+	end
+
+	local function setRewardsDetailMode(mode)
+		rewardsDetailMode = tostring(mode or "Overview")
+		if rewardsDetailMode == "" then
+			rewardsDetailMode = "Overview"
+		end
+		if renderRewards then
+			renderRewards(lastRewardsPayload)
+		end
+	end
+
+	local function getRewardsDetailTitle()
+		if rewardsDetailMode == "ActiveWorld" then
+			return "Active World Details"
+		elseif rewardsDetailMode == "Chests" then
+			return "Chests Details"
+		elseif rewardsDetailMode == "Crewmates" then
+			return "Crewmates Details"
+		elseif rewardsDetailMode == "Dropped" then
+			return "Dropped Details"
+		elseif rewardsDetailMode == "Carried" then
+			return "Carried Details"
+		elseif rewardsDetailMode == "ChestRush" then
+			return "Chest Rush Details"
+		end
+		return "Corridor Rewards"
+	end
+
+	local function makeRewardsMetricGrid(cards, order, columns, cellWidth, cellHeight)
+		local safeCards = if typeof(cards) == "table" then cards else {}
+		local safeColumns = math.max(1, math.floor(tonumber(columns) or 3))
+		local safeCellWidth = math.max(120, math.floor(tonumber(cellWidth) or 220))
+		local safeCellHeight = math.max(72, math.floor(tonumber(cellHeight) or 88))
+		local rows = math.max(1, math.ceil(#safeCards / safeColumns))
+		local grid = create("Frame", {
+			Name = "RewardsSummary",
+			BackgroundTransparency = 1,
+			LayoutOrder = order,
+			Size = UDim2.new(1, -8, 0, rows * safeCellHeight + math.max(0, rows - 1) * 10),
+			Parent = rewardsScroll,
+		})
+		create("UIGridLayout", {
+			CellPadding = UDim2.fromOffset(10, 10),
+			CellSize = UDim2.fromOffset(safeCellWidth, safeCellHeight),
+			FillDirectionMaxCells = safeColumns,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Parent = grid,
+		})
+		for index, card in ipairs(safeCards) do
+			makeRewardsMetricCard(
+				grid,
+				card.Title,
+				card.Value,
+				card.Subtitle,
+				card.AccentColor,
+				card.Order or index,
+				card.OnActivated,
+				card.Footer
+			)
+		end
+	end
+
+	local function makeRewardsPanel(title, subtitle, counts, preferredOrder, accentColor, order)
+		local items = orderedCountItems(counts, preferredOrder, 10)
+		local rowCount = math.max(1, #items)
+		local panel = create("Frame", {
+			Name = title:gsub("%W+", "") .. "Panel",
+			BackgroundColor3 = COLORS.Panel,
+			BorderSizePixel = 0,
+			LayoutOrder = order,
+			Size = UDim2.new(1, -8, 0, 48 + rowCount * 24),
+			Parent = rewardsScroll,
+		})
+		addCorner(panel, 16)
+		addStroke(panel, accentColor or COLORS.BorderSoft, 1, 0.25)
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = FONT,
+			Text = title,
+			TextColor3 = accentColor or COLORS.Text,
+			TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(14, 9),
+			Size = UDim2.new(1, -28, 0, 20),
+			Parent = panel,
+		})
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = BODY_FONT,
+			Text = subtitle,
+			TextColor3 = COLORS.Faint,
+			TextSize = 10,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(14, 29),
+			Size = UDim2.new(1, -28, 0, 14),
+			Parent = panel,
+		})
+		if #items == 0 then
+			create("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = BODY_FONT,
+				Text = "None active",
+				TextColor3 = COLORS.Muted,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Position = UDim2.fromOffset(14, 47),
+				Size = UDim2.new(1, -28, 0, 20),
+				Parent = panel,
+			})
+			return
+		end
+		for index, item in ipairs(items) do
+			create("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = BODY_FONT,
+				Text = item.Key,
+				TextColor3 = COLORS.Text,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Position = UDim2.fromOffset(14, 45 + (index - 1) * 24),
+				Size = UDim2.new(1, -96, 0, 20),
+				Parent = panel,
+			})
+			create("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = FONT,
+				Text = formatSnapshotNumber(item.Value),
+				TextColor3 = accentColor or COLORS.Gold,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				Position = UDim2.new(1, -76, 0, 45 + (index - 1) * 24),
+				Size = UDim2.fromOffset(58, 20),
+				Parent = panel,
+			})
+		end
+	end
+
+	local function makeRewardsDetailPanel(details, order, title, subtitle)
+		local list = if typeof(details) == "table" then details else {}
+		local shown = math.min(#list, 10)
+		local rowCount = math.max(1, shown)
+		local panel = create("Frame", {
+			Name = "RewardDetailsPanel",
+			BackgroundColor3 = COLORS.Panel,
+			BorderSizePixel = 0,
+			LayoutOrder = order,
+			Size = UDim2.new(1, -8, 0, 52 + rowCount * 40),
+			Parent = rewardsScroll,
+		})
+		addCorner(panel, 16)
+		addStroke(panel, COLORS.BorderSoft, 1, 0.25)
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = FONT,
+			Text = title or "Recent Active Reward Details",
+			TextColor3 = COLORS.Text,
+			TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(14, 10),
+			Size = UDim2.new(1, -28, 0, 20),
+			Parent = panel,
+		})
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = BODY_FONT,
+			Text = subtitle or "Capped list from the server snapshot",
+			TextColor3 = COLORS.Faint,
+			TextSize = 10,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(14, 30),
+			Size = UDim2.new(1, -28, 0, 14),
+			Parent = panel,
+		})
+		if shown == 0 then
+			create("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = BODY_FONT,
+				Text = "No active reward details.",
+				TextColor3 = COLORS.Muted,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Position = UDim2.fromOffset(14, 52),
+				Size = UDim2.new(1, -28, 0, 22),
+				Parent = panel,
+			})
+			return
+		end
+		for index = 1, shown do
+			local detail = list[index]
+			local label = cleanSingleLine(detail.DisplayName or detail.CrewMemberId or detail.ChestId or detail.Kind or "Reward", 64)
+			local status = cleanSingleLine(detail.Status or "", 24)
+			local source = cleanSingleLine(detail.Source or "", 24)
+			local owner = cleanSingleLine(detail.OwnerName or detail.HolderName or detail.SpawnedByName or "", 28)
+			local extra = cleanSingleLine(detail.Tier or detail.Rarity or detail.Variant or "", 28)
+			local line = string.format("%s  %s  %s", status, source, extra)
+			local remaining = tonumber(detail.TimeRemainingSeconds)
+			local age = tonumber(detail.AgeSeconds)
+			if owner ~= "" then
+				line ..= "  @" .. owner
+			end
+			if remaining then
+				line ..= "  rem " .. formatSnapshotSeconds(remaining)
+			elseif age then
+				line ..= "  age " .. formatSnapshotSeconds(age)
+			end
+			create("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = FONT,
+				Text = label,
+				TextColor3 = COLORS.Text,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Position = UDim2.fromOffset(14, 47 + (index - 1) * 40),
+				Size = UDim2.new(1, -28, 0, 17),
+				Parent = panel,
+			})
+			create("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = BODY_FONT,
+				Text = line,
+				TextColor3 = COLORS.Muted,
+				TextSize = 10,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Position = UDim2.fromOffset(14, 64 + (index - 1) * 40),
+				Size = UDim2.new(1, -28, 0, 15),
+				Parent = panel,
+			})
+		end
+	end
+
+	local function getRewardsSnapshotParts(snapshot)
+		local summary = if typeof(snapshot.Summary) == "table" then snapshot.Summary else {}
+		local chests = if typeof(snapshot.Chests) == "table" then snapshot.Chests else {}
+		local crewmates = if typeof(snapshot.Crewmates) == "table" then snapshot.Crewmates else {}
+		local runtime = if typeof(snapshot.Runtime) == "table" then snapshot.Runtime else {}
+		local spawnedRuntime = if typeof(runtime.Spawned) == "table" then runtime.Spawned else {}
+		local carriedRuntime = if typeof(runtime.Carried) == "table" then runtime.Carried else {}
+		local chestRush = if typeof(snapshot.ChestRush) == "table" then snapshot.ChestRush else {}
+		return summary, chests, crewmates, runtime, spawnedRuntime, carriedRuntime, chestRush
+	end
+
+	local function getRewardDetails(snapshot, predicate, limit)
+		local details = if typeof(snapshot.Details) == "table" then snapshot.Details else {}
+		local maxRows = math.max(1, math.floor(tonumber(limit) or 20))
+		local filtered = {}
+		for _, detail in ipairs(details) do
+			if typeof(detail) == "table" and (not predicate or predicate(detail)) then
+				filtered[#filtered + 1] = detail
+				if #filtered >= maxRows then
+					break
+				end
+			end
+		end
+		return filtered
+	end
+
+	local function isChestDetail(detail)
+		return tostring(detail.RewardType or "") == "Chest" or tostring(detail.Kind or "") == "SharedChest"
+	end
+
+	local function isCrewDetail(detail)
+		return tostring(detail.RewardType or "") == "Crew" or tostring(detail.Kind or "") == "PhysicalCrew"
+	end
+
+	local function isDroppedDetail(detail)
+		return tostring(detail.Status or "") == "Dropped"
+	end
+
+	local function isCarriedDetail(detail)
+		local status = tostring(detail.Status or "")
+		return status == "Carried" or status == "Held"
+	end
+
+	local function isActiveWorldDetail(detail)
+		local status = tostring(detail.Status or "")
+		return status ~= "Carried" and status ~= "Held" and status ~= "Claimed"
+	end
+
+	local function getDetailPlayerCounts(details)
+		local counts = {}
+		for _, detail in ipairs(details) do
+			local owner = cleanSingleLine(detail.OwnerName or detail.HolderName or "", 48)
+			if owner == "" then
+				local userId = tonumber(detail.OwnerUserId or detail.HolderUserId)
+				owner = if userId and userId > 0 then "User " .. tostring(math.floor(userId)) else "Unknown"
+			end
+			incrementRewardsCount(counts, owner)
+		end
+		return counts
+	end
+
+	local function getDetailRewardTypeCounts(details)
+		local counts = {}
+		for _, detail in ipairs(details) do
+			local rewardType = cleanSingleLine(detail.RewardType or detail.Kind or "", 48)
+			if rewardType == "SharedChest" then
+				rewardType = "Chest"
+			elseif rewardType == "PhysicalCrew" or rewardType == "LegacyRunReward" then
+				rewardType = cleanSingleLine(detail.RewardType or "Crew", 48)
+			end
+			incrementRewardsCount(counts, rewardType)
+		end
+		return counts
+	end
+
+	local function getDetailSourceCounts(details)
+		local counts = {}
+		for _, detail in ipairs(details) do
+			incrementRewardsCount(counts, detail.Source)
+		end
+		return counts
+	end
+
+	local function getRewardsCapText(chests, activeChests)
+		local maxActive = tonumber(chests.MaxActive)
+		if maxActive then
+			return ("Cap: %s / %s"):format(formatSnapshotNumber(activeChests), formatSnapshotNumber(maxActive))
+		end
+		return "Cap unavailable"
+	end
+
+	local function renderRewardsOverview(snapshot)
+		local summary, chests, crewmates, _, _, carriedRuntime, chestRush = getRewardsSnapshotParts(snapshot)
+		local activeChests = readSnapshotCount(summary.ActiveChests)
+		local activeCrewmates = readSnapshotCount(summary.ActiveCrewmates)
+		local droppedChests = readSnapshotCount(chests.Dropped)
+		local droppedCrewmates = readSnapshotCount(crewmates.Dropped)
+		local heldCrewmates = readSnapshotCount(crewmates.Held)
+		local carriedChests = readSnapshotCount(carriedRuntime.Chests)
+		local carriedCrewmates = readSnapshotCount(carriedRuntime.Crewmates) + heldCrewmates
+		local carriedTotal = carriedChests + carriedCrewmates
+		local rushActive = chestRush.Active == true
+		local rushLabel = if rushActive then "Active" else "Inactive"
+
+		makeRewardsMetricGrid({
+			{
+				Title = "Active World Rewards",
+				Value = formatSnapshotNumber(summary.ActiveWorldRewards),
+				Subtitle = ("%s chests, %s crewmates"):format(formatSnapshotNumber(activeChests), formatSnapshotNumber(activeCrewmates)),
+				AccentColor = COLORS.Gold,
+				OnActivated = function()
+					setRewardsDetailMode("ActiveWorld")
+				end,
+				Footer = "Click for details",
+			},
+			{
+				Title = "Chests",
+				Value = formatSnapshotNumber(activeChests) .. " active",
+				Subtitle = getRewardsCapText(chests, activeChests),
+				AccentColor = COLORS.Blue,
+				OnActivated = function()
+					setRewardsDetailMode("Chests")
+				end,
+				Footer = "Click for details",
+			},
+			{
+				Title = "Crewmates",
+				Value = formatSnapshotNumber(activeCrewmates) .. " active",
+				Subtitle = ("%s held, %s dropped"):format(formatSnapshotNumber(heldCrewmates), formatSnapshotNumber(droppedCrewmates)),
+				AccentColor = COLORS.Green,
+				OnActivated = function()
+					setRewardsDetailMode("Crewmates")
+				end,
+				Footer = "Click for details",
+			},
+			{
+				Title = "Dropped",
+				Value = formatSnapshotNumber(summary.DroppedRewards),
+				Subtitle = ("%s chests, %s crewmates"):format(formatSnapshotNumber(droppedChests), formatSnapshotNumber(droppedCrewmates)),
+				AccentColor = COLORS.Red,
+				OnActivated = function()
+					setRewardsDetailMode("Dropped")
+				end,
+				Footer = "Click for details",
+			},
+			{
+				Title = "Carried",
+				Value = formatSnapshotNumber(carriedTotal),
+				Subtitle = ("%s chests, %s crewmates"):format(formatSnapshotNumber(carriedChests), formatSnapshotNumber(carriedCrewmates)),
+				AccentColor = COLORS.Muted,
+				OnActivated = function()
+					setRewardsDetailMode("Carried")
+				end,
+				Footer = "Click for details",
+			},
+			{
+				Title = "Chest Rush",
+				Value = rushLabel,
+				Subtitle = ("%s | interval %s"):format(getRewardsCapText(chests, activeChests), formatSnapshotSeconds(chests.SpawnIntervalSeconds)),
+				AccentColor = if rushActive then COLORS.Gold else COLORS.Faint,
+				OnActivated = function()
+					setRewardsDetailMode("ChestRush")
+				end,
+				Footer = "Click for details",
+			},
+		}, 1, 3, 302, 112)
+	end
+
+	local function renderActiveWorldDetails(snapshot)
+		local summary, chests, crewmates = getRewardsSnapshotParts(snapshot)
+		makeRewardsMetricGrid({
+			{ Title = "Active World", Value = formatSnapshotNumber(summary.ActiveWorldRewards), Subtitle = "not carried", AccentColor = COLORS.Gold },
+			{ Title = "Chests", Value = formatSnapshotNumber(summary.ActiveChests), Subtitle = getRewardsCapText(chests, summary.ActiveChests), AccentColor = COLORS.Blue },
+			{ Title = "Crewmates", Value = formatSnapshotNumber(summary.ActiveCrewmates), Subtitle = "world available", AccentColor = COLORS.Green },
+			{ Title = "Dropped", Value = formatSnapshotNumber(summary.DroppedRewards), Subtitle = "recoverable", AccentColor = COLORS.Red },
+		}, 1, 4, 224, 78)
+		makeRewardsPanel("World Chests By Tier", "World-available shared chest tiers", chests.ByTier, { "Wooden", "Iron", "Gold" }, COLORS.Blue, 10)
+		makeRewardsPanel("World Crew By Status", "Spawned, dropped, and tutorial crewmates", crewmates.ByStatus, { "Spawned", "Dropped", "Tutorial", "Held" }, COLORS.Green, 20)
+		makeRewardsDetailPanel(getRewardDetails(snapshot, isActiveWorldDetail, 20), 30, "Active World Rows", "World-available rewards from the latest snapshot")
+	end
+
+	local function renderChestDetails(snapshot)
+		local summary, chests, _, _, _, _, chestRush = getRewardsSnapshotParts(snapshot)
+		local rushLabel = if chestRush.Active == true then "Active" else "Inactive"
+		makeRewardsMetricGrid({
+			{ Title = "Active Chests", Value = formatSnapshotNumber(summary.ActiveChests), Subtitle = "world active", AccentColor = COLORS.Blue },
+			{ Title = "Chest Cap", Value = getRewardsCapText(chests, summary.ActiveChests), Subtitle = "current server cap", AccentColor = COLORS.Gold },
+			{ Title = "Chest Rush", Value = rushLabel, Subtitle = "current event state", AccentColor = if chestRush.Active == true then COLORS.Gold else COLORS.Faint },
+			{ Title = "Next Spawn", Value = formatSnapshotSeconds(chests.NextSpawnInSeconds), Subtitle = "normal shared chest timer", AccentColor = COLORS.Muted },
+		}, 1, 4, 224, 78)
+		makeRewardsPanel("Chests By Tier", "Wooden, Iron, and Gold", chests.ByTier, { "Wooden", "Iron", "Gold" }, COLORS.Blue, 10)
+		makeRewardsPanel("Chests By Source", "Normal, Chest Rush, admin debug, and dropped", chests.BySource, { "Normal", "ChestRush", "AdminDebug", "Dropped" }, COLORS.Gold, 20)
+		makeRewardsPanel("Chests By Depth", "Shared world chest depth bands", chests.ByDepthBand, { "Shallow", "Mid", "Deep", "Abyssal" }, COLORS.Muted, 30)
+		makeRewardsDetailPanel(getRewardDetails(snapshot, isChestDetail, 20), 40, "Recent Chest Rows", "Tier, source, depth, status, and time")
+	end
+
+	local function renderCrewmateDetails(snapshot)
+		local _, _, crewmates = getRewardsSnapshotParts(snapshot)
+		makeRewardsMetricGrid({
+			{ Title = "Active Crewmates", Value = formatSnapshotNumber(crewmates.WorldAvailableCount), Subtitle = "world available", AccentColor = COLORS.Green },
+			{ Title = "Spawned", Value = formatSnapshotNumber(crewmates.Spawned), Subtitle = "available pickups", AccentColor = COLORS.Green },
+			{ Title = "Held", Value = formatSnapshotNumber(crewmates.Held), Subtitle = "currently held", AccentColor = COLORS.Gold },
+			{ Title = "Dropped", Value = formatSnapshotNumber(crewmates.Dropped), Subtitle = "recoverable", AccentColor = COLORS.Red },
+		}, 1, 4, 224, 78)
+		makeRewardsPanel("Crewmates By Rarity", "Current physical crewmate rarities", crewmates.ByRarity, nil, COLORS.Green, 10)
+		makeRewardsPanel("Crewmates By Variant", "Normal, Golden, Diamond, and event variants", crewmates.ByVariant, { "Normal", "Golden", "Diamond" }, COLORS.Green, 20)
+		makeRewardsPanel("Crewmates By Status", "Spawned, held, dropped, tutorial", crewmates.ByStatus, { "Spawned", "Held", "Dropped", "Tutorial" }, COLORS.Gold, 30)
+		makeRewardsPanel("Top Crew Names", "Top active crew member names or ids", crewmates.ByCrewMember, nil, COLORS.Blue, 40)
+		makeRewardsDetailPanel(getRewardDetails(snapshot, isCrewDetail, 20), 50, "Recent Crew Rows", "Name, rarity, variant, holder, and time")
+	end
+
+	local function renderDroppedDetails(snapshot)
+		local summary, chests, crewmates = getRewardsSnapshotParts(snapshot)
+		local droppedDetails = getRewardDetails(snapshot, isDroppedDetail, 20)
+		makeRewardsMetricGrid({
+			{ Title = "Dropped Rewards", Value = formatSnapshotNumber(summary.DroppedRewards), Subtitle = "recoverable in world", AccentColor = COLORS.Red },
+			{ Title = "Dropped Chests", Value = formatSnapshotNumber(chests.Dropped), Subtitle = "shared chest drops", AccentColor = COLORS.Blue },
+			{ Title = "Dropped Crew", Value = formatSnapshotNumber(crewmates.Dropped), Subtitle = "physical crewmates", AccentColor = COLORS.Green },
+		}, 1, 3, 302, 78)
+		makeRewardsPanel("Dropped By Type", "Dropped rewards from visible detail rows", getDetailRewardTypeCounts(droppedDetails), { "Chest", "Crew" }, COLORS.Gold, 10)
+		makeRewardsPanel("Dropped By Source", "Dropped reward sources from visible rows", getDetailSourceCounts(droppedDetails), { "Dropped", "Normal", "ChestRush", "AdminDebug" }, COLORS.Muted, 20)
+		makeRewardsDetailPanel(droppedDetails, 30, "Dropped Reward Rows", "Dropped rewards only")
+	end
+
+	local function renderCarriedDetails(snapshot)
+		local _, _, crewmates, _, _, carriedRuntime = getRewardsSnapshotParts(snapshot)
+		local heldCrewmates = readSnapshotCount(crewmates.Held)
+		local carriedChests = readSnapshotCount(carriedRuntime.Chests)
+		local carriedCrewmates = readSnapshotCount(carriedRuntime.Crewmates) + heldCrewmates
+		local carriedDetails = getRewardDetails(snapshot, isCarriedDetail, 20)
+		makeRewardsMetricGrid({
+			{ Title = "Carried Rewards", Value = formatSnapshotNumber(carriedChests + carriedCrewmates), Subtitle = "held by players", AccentColor = COLORS.Muted },
+			{ Title = "Carried Chests", Value = formatSnapshotNumber(carriedChests), Subtitle = "carry slots", AccentColor = COLORS.Blue },
+			{ Title = "Carried Crew", Value = formatSnapshotNumber(carriedCrewmates), Subtitle = "held or carry slots", AccentColor = COLORS.Green },
+			{ Title = "Players", Value = formatSnapshotNumber(#orderedCountItems(getDetailPlayerCounts(carriedDetails), nil, 100)), Subtitle = "with carried rows", AccentColor = COLORS.Gold },
+		}, 1, 4, 224, 78)
+		makeRewardsPanel("Carried By Player", "Held and carried rewards grouped by player", getDetailPlayerCounts(carriedDetails), nil, COLORS.Gold, 10)
+		makeRewardsPanel("Carried By Type", "Held and carried rows grouped by type", getDetailRewardTypeCounts(carriedDetails), { "Chest", "Crew" }, COLORS.Muted, 20)
+		makeRewardsDetailPanel(carriedDetails, 30, "Carried Reward Rows", "Player, reward, type, and status")
+	end
+
+	local function renderChestRushDetails(snapshot)
+		local _, chests, _, _, _, _, chestRush = getRewardsSnapshotParts(snapshot)
+		local rushActive = chestRush.Active == true
+		makeRewardsMetricGrid({
+			{ Title = "Chest Rush", Value = if rushActive then "Active" else "Inactive", Subtitle = "current event state", AccentColor = if rushActive then COLORS.Gold else COLORS.Faint },
+			{ Title = "Chest Cap", Value = formatSnapshotNumber(chests.MaxActive), Subtitle = "modified active cap", AccentColor = COLORS.Gold },
+			{ Title = "Spawn Interval", Value = formatSnapshotSeconds(chests.SpawnIntervalSeconds), Subtitle = "current shared interval", AccentColor = COLORS.Blue },
+			{ Title = "Next Spawn", Value = formatSnapshotSeconds(chests.NextSpawnInSeconds), Subtitle = "shared chest timer", AccentColor = COLORS.Muted },
+		}, 1, 4, 224, 78)
+		makeRewardsPanel("Chest Rush Sources", "Chest source counts in the world", chests.BySource, { "ChestRush", "Normal", "AdminDebug", "Dropped" }, COLORS.Gold, 10)
+		makeRewardsPanel("Chest Rush Tiers", "Current chest tier mix", chests.ByTier, { "Wooden", "Iron", "Gold" }, COLORS.Blue, 20)
+		makeRewardsDetailPanel(getRewardDetails(snapshot, function(detail)
+			return isChestDetail(detail) and tostring(detail.Source or "") == "ChestRush"
+		end, 20), 30, "Chest Rush Chest Rows", "Chests stamped with ChestRush source")
+	end
+
+	renderRewards = function(payload)
+		clearRewardsBody()
+		rewardsTitleLabel.Text = getRewardsDetailTitle()
+		rewardsBackButton.Visible = rewardsDetailMode ~= "Overview"
+		if typeof(payload) ~= "table" or payload.Success == false or typeof(payload.Snapshot) ~= "table" then
+			local message = if typeof(payload) == "table" then cleanSingleLine(payload.Message, 140) else ""
+			if message == "" then
+				message = "Corridor reward snapshot unavailable."
+			end
+			makeRewardsPanel("Snapshot Unavailable", message, {}, nil, COLORS.Red, 1)
+			return
+		end
+
+		local snapshot = payload.Snapshot
+		if rewardsDetailMode == "ActiveWorld" then
+			renderActiveWorldDetails(snapshot)
+		elseif rewardsDetailMode == "Chests" then
+			renderChestDetails(snapshot)
+		elseif rewardsDetailMode == "Crewmates" then
+			renderCrewmateDetails(snapshot)
+		elseif rewardsDetailMode == "Dropped" then
+			renderDroppedDetails(snapshot)
+		elseif rewardsDetailMode == "Carried" then
+			renderCarriedDetails(snapshot)
+		elseif rewardsDetailMode == "ChestRush" then
+			renderChestRushDetails(snapshot)
+		else
+			renderRewardsOverview(snapshot)
+		end
+
+		task.defer(function()
+			if rewardsScroll.Parent then
+				rewardsScroll.CanvasSize = UDim2.fromOffset(0, rewardsLayout.AbsoluteContentSize.Y + 12)
+			end
+		end)
+	end
+
+	requestRewards = function()
+		if rewardsLoading then
+			return
+		end
+
+		if not adminCorridorRewardsFunction:IsA("RemoteFunction") then
+			rewardsUpdatedLabel.Text = "Reward snapshot remote unavailable."
+			lastRewardsPayload = {
+				Success = false,
+				Message = "Reward snapshot remote unavailable.",
+			}
+			renderRewards(lastRewardsPayload)
+			return
+		end
+
+		rewardsLoading = true
+		rewardsUpdatedLabel.Text = "Loading reward snapshot..."
+		setButtonStyle(rewardsRefreshButton, true, false)
+
+		task.spawn(function()
+			local ok, payload = pcall(function()
+				return adminCorridorRewardsFunction:InvokeServer()
+			end)
+
+			rewardsLoading = false
+			if not gui.Parent then
+				return
+			end
+
+			if ok and typeof(payload) == "table" and payload.Success ~= false then
+				lastRewardsRefresh = os.clock()
+				lastRewardsPayload = payload
+				rewardsUpdatedLabel.Text = "Updated now"
+				renderRewards(payload)
+			else
+				local message = "Unable to load corridor reward snapshot."
+				if ok and typeof(payload) == "table" then
+					message = cleanSingleLine(payload.Message, 140)
+				end
+				if message == "" then
+					message = "Unable to load corridor reward snapshot."
+				end
+				lastRewardsPayload = {
+					Success = false,
+					Message = message,
+				}
+				rewardsUpdatedLabel.Text = message
+				renderRewards(lastRewardsPayload)
+			end
+
+			setButtonStyle(rewardsRefreshButton, false, false)
+		end)
+	end
+
+	local function startRewardsAutoRefresh()
+		rewardsAutoRefreshToken += 1
+		local token = rewardsAutoRefreshToken
+		task.spawn(function()
+			while gui.Parent and gui.Enabled and currentTab == "Rewards" and rewardsAutoRefreshToken == token do
+				if requestRewards and os.clock() - lastRewardsRefresh >= 4 then
+					requestRewards()
+				end
+				task.wait(1)
+			end
+		end)
+	end
+
 	local function updateTabButtons()
 		for tabName, button in pairs(tabButtons) do
 			setButtonStyle(button, tabName == currentTab, false)
@@ -1996,15 +2866,26 @@ local function buildDashboard()
 	end
 
 	setActiveTab = function(tabName)
-		if tabName == "Admins" or tabName == "AllPlayers" or tabName == "Testers" or tabName == "Audit" then
+		if tabName == "Admins" or tabName == "AllPlayers" or tabName == "Testers" or tabName == "Audit" or tabName == "Rewards" then
 			currentTab = tabName
 		else
 			currentTab = "Commands"
 		end
 		commandView.Visible = currentTab == "Commands"
-		rosterView.Visible = currentTab ~= "Commands"
+		rosterView.Visible = currentTab ~= "Commands" and currentTab ~= "Rewards"
+		rewardsView.Visible = currentTab == "Rewards"
 		updateTabButtons()
 
+		if currentTab == "Rewards" then
+			renderRewards(lastRewardsPayload)
+			if requestRewards and os.clock() - lastRewardsRefresh > 1 then
+				requestRewards()
+			end
+			startRewardsAutoRefresh()
+			return
+		end
+
+		rewardsAutoRefreshToken += 1
 		if currentTab ~= "Commands" and renderRoster then
 			renderRoster(lastRosterPayload)
 		end
@@ -2037,6 +2918,12 @@ local function buildDashboard()
 	tabButtons.Audit.Activated:Connect(function()
 		pulseButton(tabButtons.Audit)
 		setActiveTab("Audit")
+	end)
+
+	tabButtons.Rewards.Activated:Connect(function()
+		pulseButton(tabButtons.Rewards)
+		rewardsDetailMode = "Overview"
+		setActiveTab("Rewards")
 	end)
 
 	local function clearRosterList(roster)
@@ -2555,7 +3442,7 @@ local function buildDashboard()
 	end
 
 	local function queueRosterRefresh(reason)
-		if rosterRefreshQueued or currentTab == "Commands" or not gui.Enabled then
+		if rosterRefreshQueued or currentTab == "Commands" or currentTab == "Rewards" or not gui.Enabled then
 			return
 		end
 
@@ -2563,7 +3450,7 @@ local function buildDashboard()
 		rosterUpdatedLabel.Text = cleanSingleLine(reason or "Roster changed.", 120)
 		task.delay(0.2, function()
 			rosterRefreshQueued = false
-			if gui.Parent and gui.Enabled and currentTab ~= "Commands" and requestRoster then
+			if gui.Parent and gui.Enabled and currentTab ~= "Commands" and currentTab ~= "Rewards" and requestRoster then
 				requestRoster()
 			end
 		end)
@@ -2665,6 +3552,16 @@ local function buildDashboard()
 	rosterRefreshButton.Activated:Connect(function()
 		pulseButton(rosterRefreshButton)
 		requestRoster()
+	end)
+
+	rewardsRefreshButton.Activated:Connect(function()
+		pulseButton(rewardsRefreshButton)
+		requestRewards()
+	end)
+
+	rewardsBackButton.Activated:Connect(function()
+		pulseButton(rewardsBackButton)
+		setRewardsDetailMode("Overview")
 	end)
 
 	testerAddButton.Activated:Connect(function()

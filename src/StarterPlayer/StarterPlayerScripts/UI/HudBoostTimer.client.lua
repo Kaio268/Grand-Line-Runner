@@ -12,6 +12,7 @@ local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local Responsive = require(UiFolder:WaitForChild("Responsive"))
 local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
+local BottomRightHudCoordinator = require(UiFolder:WaitForChild("Hud"):WaitForChild("BottomRightHudCoordinator"))
 local HudBoostTimer = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudBoostTimer"))
 
 local rootContainer = Instance.new("Folder")
@@ -22,6 +23,22 @@ local root = ReactRoblox.createRoot(rootContainer)
 
 local destroyed = false
 local renderQueued = false
+local coordinatorConnection
+local CARRIED_RESERVATION_KEYS = {
+	"CorridorInHand",
+	"BaseHeldCrew",
+}
+
+local function getActiveCarriedReservation()
+	for _, reservationKey in ipairs(CARRIED_RESERVATION_KEYS) do
+		local reservation = BottomRightHudCoordinator.GetReservation(reservationKey)
+		if reservation ~= nil then
+			return reservation
+		end
+	end
+
+	return nil
+end
 
 local function hideLegacyBoosts()
 	local hud = playerGui:FindFirstChild("HUD")
@@ -53,7 +70,7 @@ local function hideLegacyBoosts()
 	end
 end
 
-local function ensureHost()
+local function ensureHost(boostLayout)
 	local hud = playerGui:FindFirstChild("HUD")
 	if not hud then
 		return nil
@@ -85,7 +102,7 @@ local function ensureHost()
 	end
 
 	local mode = Responsive.getHudLayoutMode()
-	local layout = HudLayout.getBoostTimer(mode)
+	local layout = boostLayout or HudLayout.getBoostTimer(mode)
 	host.AnchorPoint = Vector2.new(1, 0)
 	host.AutomaticSize = Enum.AutomaticSize.None
 	host.BackgroundTransparency = 1
@@ -102,10 +119,16 @@ end
 local function render()
 	hideLegacyBoosts()
 
-	local host = ensureHost()
+	local layoutMode = HudLayout.getMode()
+	local carriedReservation = if layoutMode == "phone" then getActiveCarriedReservation() else nil
+	local boostLayout = HudLayout.getBoostTimer(layoutMode, {
+		anchorRect = carriedReservation and carriedReservation.Rect or nil,
+	})
+	local host = ensureHost(boostLayout)
 	if host then
 		root:render(ReactRoblox.createPortal(React.createElement(HudBoostTimer, {
-			layoutMode = Responsive.getHudLayoutMode(),
+			boostLayout = boostLayout,
+			layoutMode = layoutMode,
 			player = player,
 		}), host))
 	else
@@ -193,6 +216,9 @@ local function bindViewportConnections()
 end
 
 bindViewportConnections()
+coordinatorConnection = BottomRightHudCoordinator.Subscribe(function()
+	scheduleRender()
+end)
 scheduleRender()
 
 script.Destroying:Connect(function()
@@ -203,6 +229,10 @@ script.Destroying:Connect(function()
 	disconnectHudConnections()
 	for _, connection in ipairs(viewportConnections) do
 		connection:Disconnect()
+	end
+	if coordinatorConnection then
+		coordinatorConnection:Disconnect()
+		coordinatorConnection = nil
 	end
 	root:unmount()
 end)

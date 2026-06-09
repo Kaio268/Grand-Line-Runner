@@ -305,7 +305,7 @@ local function HudBoostTimer(props)
 	local showBoostRows = not phone or mobileExpanded == true
 
 	if phone then
-		local boostLayout = HudLayout.getBoostTimer(props.layoutMode)
+		local boostLayout = props.boostLayout or HudLayout.getBoostTimer(props.layoutMode)
 		local laneHeight = math.max(tonumber(boostLayout.size and boostLayout.size.Y.Offset) or 118, 34)
 		local summaryHeight = tonumber(boostLayout.collapsedHeight) or 34
 		local stackGap = tonumber(boostLayout.stackGap) or 6

@@ -16,6 +16,8 @@ local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAr
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
+local BottomRightHudCoordinator = require(UiFolder:WaitForChild("Hud"):WaitForChild("BottomRightHudCoordinator"))
 local Responsive = require(UiFolder:WaitForChild("Responsive"))
 local BaseHeldCrewPanel = require(UiFolder:WaitForChild("Crew"):WaitForChild("BaseHeldCrewPanel"))
 
@@ -54,11 +56,16 @@ local destroyed = false
 local connections = {}
 local characterConnections = {}
 local toolAttributeConnections = {}
+local viewportConnection
+local cameraConnection
+local coordinatorConnection
 local crewActionRequestSequence = 0
 local pendingCrewActionRequestId = nil
 
 local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
 local STARTING_AREA_KEY = BiomeAreas.StartingAreaKey
+local RESERVATION_KEY = "BaseHeldCrew"
+local DEVIL_FRUIT_RESERVATION_KEY = "DevilFruit"
 local HUD_HOST_NAME = "BaseHeldCrewHUDHost"
 local HUD_DISPLAY_ORDER = 119
 local BASE_AREA_NAMES = {
@@ -324,17 +331,42 @@ local function getHeldCrewSlot()
 	return nil
 end
 
+local function setBaseHeldReservation(isVisible, layoutMode, devilFruitRect)
+	if isVisible ~= true then
+		BottomRightHudCoordinator.ClearReservation(RESERVATION_KEY)
+		return
+	end
+
+	local layout = HudLayout.getBaseHeldCrewLayout(layoutMode, {
+		devilFruitRect = devilFruitRect,
+	})
+	BottomRightHudCoordinator.SetReservation(RESERVATION_KEY, {
+		Padding = layout.reservationPadding,
+		Priority = layout.priority,
+		Rect = layout.rect,
+		Source = RESERVATION_KEY,
+		Visible = true,
+	})
+end
+
 local function render()
 	local modalOpen = playerGui:GetAttribute(modalOpenAttribute) == true
 	local equippedCrew = getEquippedHotbarCrew()
 	local heldItem = equippedCrew or getHeldCrewSlot()
 	local visible = equippedCrew ~= nil and isInBaseArea() and modalOpen ~= true and not isRunActive()
+	local layoutMode = HudLayout.getMode()
+	local devilFruitReservation = BottomRightHudCoordinator.GetReservation(DEVIL_FRUIT_RESERVATION_KEY)
+	local devilFruitRect = devilFruitReservation and devilFruitReservation.Rect or nil
+
+	setBaseHeldReservation(visible, layoutMode, devilFruitRect)
 
 	root:render(ReactRoblox.createPortal(React.createElement(BaseHeldCrewPanel, {
 		visible = visible,
 		pending = pending,
 		item = heldItem,
 		compact = Responsive.isCompact(),
+		devilFruitRect = devilFruitRect,
+		layoutMode = layoutMode,
 		onStore = function(item)
 			if pending or (not crewActionRemote and not crewActionEvent) then
 				return
@@ -397,6 +429,25 @@ local function scheduleRender()
 			render()
 		end
 	end)
+end
+
+local function bindViewportUpdates()
+	if viewportConnection then
+		viewportConnection:Disconnect()
+		viewportConnection = nil
+	end
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(scheduleRender)
+	end
+
+	if not cameraConnection then
+		cameraConnection = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+			bindViewportUpdates()
+			scheduleRender()
+		end)
+	end
 end
 
 local function scheduleToolRender()
@@ -472,9 +523,26 @@ trackConnection(player.CharacterAdded, bindCharacter)
 bindCharacter(player.Character)
 trackConnection(Lighting:GetAttributeChangedSignal(ACTIVE_AREA_ATTRIBUTE), scheduleRender)
 trackConnection(playerGui:GetAttributeChangedSignal(modalOpenAttribute), scheduleRender)
+bindViewportUpdates()
+coordinatorConnection = BottomRightHudCoordinator.Subscribe(function()
+	scheduleRender()
+end)
 
 script.Destroying:Connect(function()
 	destroyed = true
+	BottomRightHudCoordinator.ClearReservation(RESERVATION_KEY)
+	if viewportConnection then
+		viewportConnection:Disconnect()
+		viewportConnection = nil
+	end
+	if cameraConnection then
+		cameraConnection:Disconnect()
+		cameraConnection = nil
+	end
+	if coordinatorConnection then
+		coordinatorConnection:Disconnect()
+		coordinatorConnection = nil
+	end
 	disconnectAll()
 	disconnectCharacter()
 	root:unmount()

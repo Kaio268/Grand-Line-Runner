@@ -1,8 +1,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 local React = require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("React"))
 local PreviewViewport = require(
 	script.Parent.Parent:WaitForChild("Index"):WaitForChild("Components"):WaitForChild("PreviewViewport")
@@ -329,11 +331,11 @@ local function BaseHeldCrewPanel(props)
 
 	local item = props.item or {}
 	local pending = props.pending == true
-	local compact = props.compact == true
-	local width = if compact then 270 else 318
-	local height = if compact then 140 else 176
-	local bottomOffset = if compact then 270 else 392
-	local rightOffset = if compact then 12 else 24
+	local layout = HudLayout.getBaseHeldCrewLayout(props.layoutMode, {
+		devilFruitRect = props.devilFruitRect,
+	})
+	local compact = layout.compact == true or props.compact == true
+	local height = tonumber(layout.size.Y.Offset) or (if compact then 140 else 176)
 	local slotTop = if compact then 22 else 24
 	local slotHeight = if compact then 78 else 100
 	local buttonHeight = if compact then 26 else 32
@@ -341,17 +343,17 @@ local function BaseHeldCrewPanel(props)
 
 	return e("Frame", {
 		Active = false,
-		AnchorPoint = Vector2.new(1, 1),
+		AnchorPoint = layout.anchorPoint,
 		BackgroundColor3 = PALETTE.Glass,
 		BackgroundTransparency = 0.14,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,
-		Position = UDim2.new(1, -rightOffset, 1, -bottomOffset),
-		Size = UDim2.fromOffset(width, height),
+		Position = layout.position,
+		Size = layout.size,
 		ZIndex = 60,
 	}, {
 		Scale = e("UIScale", {
-			Scale = compact and 0.9 or 1,
+			Scale = layout.scale or 1,
 		}),
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 8),

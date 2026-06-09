@@ -148,6 +148,7 @@ HudLayout.DevilFruit = {
 	tablet = {
 		compact = false,
 		position = UDim2.new(1, -12, 1, -300),
+		scale = 0.84,
 		width = 318,
 	},
 	compactDesktop = {
@@ -222,6 +223,114 @@ local MOBILE_RIGHT_STACK = {
 	boostSize = Vector2.new(300, 118),
 	boostCollapsedHeight = 34,
 	devilFruitReservedHeight = 190,
+}
+
+local PHONE_IN_HAND_ASPECT = 232 / 82
+local PHONE_IN_HAND_MIN_WIDTH = 172
+local PHONE_IN_HAND_MAX_WIDTH = 232
+local PHONE_IN_HAND_MIN_HEIGHT = 61
+local PHONE_IN_HAND_MAX_HEIGHT = 82
+
+local BOTTOM_RIGHT_FLOATING_PANEL = {
+	phone = {
+		topInset = 96,
+		anchorPadding = 12,
+	},
+	tablet = {
+		topInset = 132,
+		anchorPadding = 12,
+	},
+	compactDesktop = {
+		topInset = 96,
+		anchorPadding = 12,
+	},
+	desktop = {
+		topInset = 122,
+		anchorPadding = 12,
+	},
+}
+
+local CORRIDOR_IN_HAND = {
+	phone = {
+		anchorPoint = Vector2.new(1, 1),
+		position = UDim2.new(1, -96, 1, -194),
+		size = UDim2.fromOffset(PHONE_IN_HAND_MAX_WIDTH, PHONE_IN_HAND_MAX_HEIGHT),
+		scale = 1,
+		aspectRatio = PHONE_IN_HAND_ASPECT,
+		minSize = Vector2.new(PHONE_IN_HAND_MIN_WIDTH, PHONE_IN_HAND_MIN_HEIGHT),
+		maxSize = Vector2.new(PHONE_IN_HAND_MAX_WIDTH, PHONE_IN_HAND_MAX_HEIGHT),
+		priority = 200,
+		reservationPadding = 12,
+	},
+	tablet = {
+		anchorPoint = Vector2.new(1, 1),
+		position = UDim2.new(1, -24, 1, -318),
+		size = UDim2.new(0.32, 0, 0, 136),
+		scale = 1,
+		minSize = Vector2.new(286, 122),
+		maxSize = Vector2.new(388, 136),
+		priority = 200,
+		reservationPadding = 12,
+	},
+	compactDesktop = {
+		anchorPoint = Vector2.new(1, 1),
+		position = UDim2.new(1, -140, 1, -226),
+		size = UDim2.new(0.26, 0, 0, 104),
+		scale = 0.78,
+		minSize = Vector2.new(230, 94),
+		maxSize = Vector2.new(310, 104),
+		priority = 200,
+		reservationPadding = 12,
+	},
+	desktop = {
+		anchorPoint = Vector2.new(1, 1),
+		position = UDim2.new(1, -24, 1, -318),
+		size = UDim2.new(0.32, 0, 0, 136),
+		scale = 1,
+		minSize = Vector2.new(286, 122),
+		maxSize = Vector2.new(388, 136),
+		priority = 200,
+		reservationPadding = 12,
+	},
+}
+
+local BASE_HELD_CREW = {
+	phone = {
+		anchorPoint = Vector2.new(1, 1),
+		position = UDim2.new(1, -12, 1, -270),
+		size = UDim2.fromOffset(270, 140),
+		scale = 1,
+		compact = true,
+		priority = 160,
+		reservationPadding = 12,
+	},
+	tablet = {
+		anchorPoint = Vector2.new(1, 1),
+		position = UDim2.new(1, -24, 1, -392),
+		size = UDim2.fromOffset(318, 176),
+		scale = 1,
+		compact = false,
+		priority = 160,
+		reservationPadding = 12,
+	},
+	compactDesktop = {
+		anchorPoint = Vector2.new(1, 1),
+		position = UDim2.new(1, -12, 1, -270),
+		size = UDim2.fromOffset(270, 140),
+		scale = 0.9,
+		compact = true,
+		priority = 160,
+		reservationPadding = 12,
+	},
+	desktop = {
+		anchorPoint = Vector2.new(1, 1),
+		position = UDim2.new(1, -24, 1, -392),
+		size = UDim2.fromOffset(318, 176),
+		scale = 1,
+		compact = false,
+		priority = 160,
+		reservationPadding = 12,
+	},
 }
 
 HudLayout.InventoryToggle = {
@@ -356,6 +465,129 @@ local function roundOffset(value)
 	return math.floor((tonumber(value) or 0) + 0.5)
 end
 
+local function resolveMode(mode, viewport)
+	local size = viewport or Responsive.getViewportSize()
+	local resolvedMode = tostring(mode or Responsive.getHudLayoutMode(size))
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(size) then
+		return "phone"
+	end
+	return resolvedMode
+end
+
+local function resolveUDimOffset(value, axisSize)
+	return (tonumber(value.Scale) or 0) * axisSize + (tonumber(value.Offset) or 0)
+end
+
+local function clampSize(size, minSize, maxSize)
+	local width = roundOffset(size.X)
+	local height = roundOffset(size.Y)
+
+	if minSize then
+		width = math.max(width, roundOffset(minSize.X))
+		height = math.max(height, roundOffset(minSize.Y))
+	end
+	if maxSize then
+		width = math.min(width, roundOffset(maxSize.X))
+		height = math.min(height, roundOffset(maxSize.Y))
+	end
+
+	return Vector2.new(width, height)
+end
+
+local function resolveLayoutSize(layout, viewport)
+	local rawSize = layout.size or UDim2.fromOffset(0, 0)
+	local size = Vector2.new(
+		resolveUDimOffset(rawSize.X, viewport.X),
+		resolveUDimOffset(rawSize.Y, viewport.Y)
+	)
+	return clampSize(size, layout.minSize, layout.maxSize)
+end
+
+local function getRectFromLayout(layout, viewport)
+	local scale = tonumber(layout.scale) or 1
+	local size = resolveLayoutSize(layout, viewport)
+	local visualSize = Vector2.new(roundOffset(size.X * scale), roundOffset(size.Y * scale))
+	local position = layout.position or UDim2.fromOffset(0, 0)
+	local anchorPoint = layout.anchorPoint or Vector2.zero
+	local anchorPosition = Vector2.new(
+		resolveUDimOffset(position.X, viewport.X),
+		resolveUDimOffset(position.Y, viewport.Y)
+	)
+
+	return {
+		x = roundOffset(anchorPosition.X - (visualSize.X * anchorPoint.X)),
+		y = roundOffset(anchorPosition.Y - (visualSize.Y * anchorPoint.Y)),
+		width = visualSize.X,
+		height = visualSize.Y,
+	}
+end
+
+local function normalizeRect(rect)
+	if typeof(rect) ~= "table" then
+		return nil
+	end
+
+	local x = tonumber(rect.x)
+	local y = tonumber(rect.y)
+	local width = tonumber(rect.width)
+	local height = tonumber(rect.height)
+	if not (x and y and width and height) then
+		return nil
+	end
+
+	return {
+		x = x,
+		y = y,
+		width = math.max(0, width),
+		height = math.max(0, height),
+	}
+end
+
+local function placeLayoutAboveAnchor(layout, anchorRect, viewport, resolvedMode)
+	local rect = normalizeRect(anchorRect)
+	if not rect then
+		return layout
+	end
+
+	local placement = getByMode(BOTTOM_RIGHT_FLOATING_PANEL, resolvedMode)
+	local scale = tonumber(layout.scale) or 1
+	local size = resolveLayoutSize(layout, viewport)
+	local visualSize = Vector2.new(roundOffset(size.X * scale), roundOffset(size.Y * scale))
+	local padding = math.max(
+		0,
+		tonumber(layout.reservationPadding)
+			or tonumber(placement.anchorPadding)
+			or 12
+	)
+	local anchorRight = rect.x + rect.width
+	local rightInset = math.max(0, roundOffset(viewport.X - anchorRight))
+	local minTop = math.max(0, roundOffset(tonumber(placement.topInset) or 96))
+	local targetTop = roundOffset(rect.y - padding - visualSize.Y)
+	local top = math.max(minTop, targetTop)
+
+	layout.anchorPoint = Vector2.new(1, 0)
+	layout.position = UDim2.new(1, -rightInset, 0, top)
+	return layout
+end
+
+local function applyPhoneInHandAspect(layout, anchorRect)
+	local aspectRatio = tonumber(layout.aspectRatio) or PHONE_IN_HAND_ASPECT
+	if aspectRatio <= 0 then
+		return layout
+	end
+
+	local rect = normalizeRect(anchorRect)
+	local rightEdge = if rect then rect.x + rect.width else PHONE_IN_HAND_MAX_WIDTH + MOBILE_RIGHT_STACK.rightInset
+	local availableWidth = math.max(1, rightEdge - MOBILE_RIGHT_STACK.rightInset)
+	local width = roundOffset(math.clamp(availableWidth, PHONE_IN_HAND_MIN_WIDTH, PHONE_IN_HAND_MAX_WIDTH))
+	local height = roundOffset(width / aspectRatio)
+	layout.size = UDim2.fromOffset(width, height)
+	layout.minSize = Vector2.new(PHONE_IN_HAND_MIN_WIDTH, PHONE_IN_HAND_MIN_HEIGHT)
+	layout.maxSize = Vector2.new(PHONE_IN_HAND_MAX_WIDTH, PHONE_IN_HAND_MAX_HEIGHT)
+	layout.scale = 1
+	return layout
+end
+
 local function scaleOffsetSize(size, scale)
 	return UDim2.new(
 		size.X.Scale,
@@ -402,7 +634,7 @@ end
 
 local function shouldUseMobileRightStack(mode, viewport)
 	local size = viewport or Responsive.getViewportSize()
-	local resolvedMode = tostring(mode or Responsive.getHudLayoutMode(size))
+	local resolvedMode = resolveMode(mode, size)
 	return resolvedMode == "phone" or Responsive.isPhoneViewport(size)
 end
 
@@ -520,38 +752,86 @@ function HudLayout.rectsIntersect(a, b)
 end
 
 function HudLayout.getCurrency(mode, _leftMenuRect)
-	local resolvedMode = mode or HudLayout.getMode()
-	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
-		resolvedMode = "phone"
-	end
+	local resolvedMode = resolveMode(mode)
 
 	local layout = getByMode(CURRENCY, resolvedMode)
 	return layout
 end
 
 function HudLayout.getDevilFruit(mode)
-	local resolvedMode = mode or HudLayout.getMode()
-	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
-		resolvedMode = "phone"
-	end
+	local resolvedMode = resolveMode(mode)
 
 	return getByMode(HudLayout.DevilFruit, resolvedMode)
 end
 
-function HudLayout.getTopBanner(mode)
-	local resolvedMode = mode or HudLayout.getMode()
-	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
-		resolvedMode = "phone"
+function HudLayout.getDevilFruitPlacement(mode, options)
+	local viewport = Responsive.getViewportSize()
+	local resolvedMode = resolveMode(mode, viewport)
+	local layout = HudLayout.getDevilFruit(resolvedMode)
+	local width = roundOffset(tonumber(options and options.width) or layout.width or 0)
+	local height = roundOffset(tonumber(options and options.height) or 0)
+	local scale = tonumber(layout.scale) or 1
+	local anchorPoint = layout.anchorPoint or Vector2.new(1, 1)
+	local position = layout.position
+
+	local stack = HudLayout.getMobileRightStack(resolvedMode, {
+		devilFruitHeight = height,
+	})
+	if stack then
+		anchorPoint = stack.devilFruit.anchorPoint
+		position = stack.devilFruit.position
 	end
+
+	return {
+		anchorPoint = anchorPoint,
+		position = position,
+		width = width,
+		height = height,
+		scale = scale,
+		rect = getRectFromLayout({
+			anchorPoint = anchorPoint,
+			position = position,
+			size = UDim2.fromOffset(width, height),
+			scale = scale,
+		}, viewport),
+	}
+end
+
+function HudLayout.getCorridorInHandLayout(mode, options)
+	local viewport = Responsive.getViewportSize()
+	local resolvedMode = resolveMode(mode, viewport)
+	local layout = getByMode(CORRIDOR_IN_HAND, resolvedMode)
+	layout.compact = resolvedMode == "phone" or resolvedMode == "compactDesktop" or Responsive.isCompact(viewport)
+	layout.phoneFit = resolvedMode == "phone" or Responsive.isPhoneViewport(viewport)
+	local anchorRect = options and (options.devilFruitRect or options.anchorRect)
+	if resolvedMode == "phone" then
+		applyPhoneInHandAspect(layout, anchorRect)
+	end
+	placeLayoutAboveAnchor(layout, anchorRect, viewport, resolvedMode)
+	layout.rect = getRectFromLayout(layout, viewport)
+	return layout
+end
+
+function HudLayout.getBaseHeldCrewLayout(mode, options)
+	local viewport = Responsive.getViewportSize()
+	local resolvedMode = resolveMode(mode, viewport)
+	local layout = getByMode(BASE_HELD_CREW, resolvedMode)
+	layout.compact = layout.compact == true or resolvedMode == "phone" or resolvedMode == "compactDesktop"
+	local anchorRect = options and (options.devilFruitRect or options.anchorRect)
+	placeLayoutAboveAnchor(layout, anchorRect, viewport, resolvedMode)
+	layout.rect = getRectFromLayout(layout, viewport)
+	return layout
+end
+
+function HudLayout.getTopBanner(mode)
+	local resolvedMode = resolveMode(mode)
 
 	return getByMode(HudLayout.TopBanner, resolvedMode)
 end
 
-function HudLayout.getBoostTimer(mode)
-	local resolvedMode = mode or HudLayout.getMode()
-	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
-		resolvedMode = "phone"
-	end
+function HudLayout.getBoostTimer(mode, options)
+	local viewport = Responsive.getViewportSize()
+	local resolvedMode = resolveMode(mode, viewport)
 
 	local layout = getByMode(HudLayout.BoostTimer, resolvedMode)
 	local stack = HudLayout.getMobileRightStack(resolvedMode)
@@ -561,41 +841,40 @@ function HudLayout.getBoostTimer(mode)
 		layout.collapsedHeight = stack.boost.collapsedHeight
 		layout.stackGap = stack.gap
 	end
+
+	local anchorRect = options and (options.anchorRect or options.carriedRect)
+	local rect = if resolvedMode == "phone" then normalizeRect(anchorRect) else nil
+	if rect then
+		local visualSize = resolveLayoutSize(layout, viewport)
+		local padding = tonumber(options and options.padding) or BOTTOM_RIGHT_FLOATING_PANEL.phone.anchorPadding
+		local rightInset = math.max(0, roundOffset(viewport.X - (rect.x + rect.width)))
+		local top = math.max(MOBILE_RIGHT_STACK.minTop, roundOffset(rect.y - padding - visualSize.Y))
+		layout.position = UDim2.new(1, -rightInset, 0, top)
+	end
+
 	return layout
 end
 
 function HudLayout.getInventoryToggle(mode)
-	local resolvedMode = mode or HudLayout.getMode()
-	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
-		resolvedMode = "phone"
-	end
+	local resolvedMode = resolveMode(mode)
 
 	return getByMode(HudLayout.InventoryToggle, resolvedMode)
 end
 
 function HudLayout.getHotbar(mode)
-	local resolvedMode = mode or HudLayout.getMode()
-	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
-		resolvedMode = "phone"
-	end
+	local resolvedMode = resolveMode(mode)
 
 	return getByMode(HudLayout.Hotbar, resolvedMode)
 end
 
 function HudLayout.getPopups(mode)
-	local resolvedMode = mode or HudLayout.getMode()
-	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
-		resolvedMode = "phone"
-	end
+	local resolvedMode = resolveMode(mode)
 
 	return getByMode(HudLayout.Popups, resolvedMode)
 end
 
 function HudLayout.getWaveProgress(mode)
-	local resolvedMode = mode or HudLayout.getMode()
-	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
-		resolvedMode = "phone"
-	end
+	local resolvedMode = resolveMode(mode)
 
 	return getByMode(HudLayout.WaveProgress, resolvedMode)
 end

@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -17,6 +18,8 @@ local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatal
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
+local BottomRightHudCoordinator = require(UiFolder:WaitForChild("Hud"):WaitForChild("BottomRightHudCoordinator"))
 local DropAction = require(UiFolder:WaitForChild("Corridor"):WaitForChild("DropAction"))
 
 local verticalSliceConfig = Economy.VerticalSlice
@@ -40,6 +43,11 @@ local dropPending = false
 local renderQueued = false
 local destroyed = false
 local cleanupConnections = {}
+local viewportConnection
+local cameraConnection
+local coordinatorConnection
+local RESERVATION_KEY = "CorridorInHand"
+local DEVIL_FRUIT_RESERVATION_KEY = "DevilFruit"
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
 local STARTING_AREA_KEY = BiomeAreas.StartingAreaKey
@@ -329,6 +337,24 @@ local function isInCorridorArea()
 	return typeof(activeArea) == "string" and activeArea ~= "" and activeArea ~= STARTING_AREA_KEY
 end
 
+local function setInHandReservation(isVisible, layoutMode, devilFruitRect)
+	if isVisible ~= true then
+		BottomRightHudCoordinator.ClearReservation(RESERVATION_KEY)
+		return
+	end
+
+	local layout = HudLayout.getCorridorInHandLayout(layoutMode, {
+		devilFruitRect = devilFruitRect,
+	})
+	BottomRightHudCoordinator.SetReservation(RESERVATION_KEY, {
+		Padding = layout.reservationPadding,
+		Priority = layout.priority,
+		Rect = layout.rect,
+		Source = RESERVATION_KEY,
+		Visible = true,
+	})
+end
+
 function getRunState()
 	return currentState and currentState.Run or nil
 end
@@ -425,6 +451,11 @@ local function render()
 	local firstOccupiedSlot = getFirstOccupiedCarrySlot(carriedSlots)
 	local visible = (carriedReward ~= nil or firstOccupiedSlot ~= nil) and modalOpen ~= true
 	local showInHandHud = hasOccupiedCarrySlot(carriedSlots) and isInCorridorArea() and modalOpen ~= true
+	local layoutMode = HudLayout.getMode()
+	local devilFruitReservation = BottomRightHudCoordinator.GetReservation(DEVIL_FRUIT_RESERVATION_KEY)
+	local devilFruitRect = devilFruitReservation and devilFruitReservation.Rect or nil
+
+	setInHandReservation(showInHandHud, layoutMode, devilFruitRect)
 
 	root:render(ReactRoblox.createPortal(React.createElement(DropAction, {
 		visible = visible,
@@ -433,6 +464,8 @@ local function render()
 		carriedItem = carriedItem,
 		carriedSlots = carriedSlots,
 		carriedCrewMember = carriedCrewMember,
+		devilFruitRect = devilFruitRect,
+		layoutMode = layoutMode,
 		showInHandHud = showInHandHud,
 		onDrop = function(slot)
 			local dropSlot = if typeof(slot) == "table" and slot.Occupied == true then slot else getFirstOccupiedCarrySlot(getCarrySlots())
@@ -492,6 +525,25 @@ local function scheduleRender()
 	end)
 end
 
+local function bindViewportUpdates()
+	if viewportConnection then
+		viewportConnection:Disconnect()
+		viewportConnection = nil
+	end
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(scheduleRender)
+	end
+
+	if not cameraConnection then
+		cameraConnection = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+			bindViewportUpdates()
+			scheduleRender()
+		end)
+	end
+end
+
 trackConnection(stateRemote.OnClientEvent, function(nextState)
 	if typeof(nextState) ~= "table" then
 		return
@@ -506,6 +558,10 @@ trackConnection(player:GetAttributeChangedSignal("CarriedMajorRewardDisplayName"
 trackConnection(player:GetAttributeChangedSignal("CarriedMajorRewardType"), scheduleRender)
 trackConnection(player:GetAttributeChangedSignal(CARRIED_CREW_MEMBER_ATTRIBUTE), scheduleRender)
 trackConnection(Lighting:GetAttributeChangedSignal(ACTIVE_AREA_ATTRIBUTE), scheduleRender)
+bindViewportUpdates()
+coordinatorConnection = BottomRightHudCoordinator.Subscribe(function()
+	scheduleRender()
+end)
 
 task.spawn(function()
 	local ok, response = pcall(function()
@@ -523,6 +579,19 @@ render()
 
 script.Destroying:Connect(function()
 	destroyed = true
+	BottomRightHudCoordinator.ClearReservation(RESERVATION_KEY)
+	if viewportConnection then
+		viewportConnection:Disconnect()
+		viewportConnection = nil
+	end
+	if cameraConnection then
+		cameraConnection:Disconnect()
+		cameraConnection = nil
+	end
+	if coordinatorConnection then
+		coordinatorConnection:Disconnect()
+		coordinatorConnection = nil
+	end
 	for _, connection in ipairs(cleanupConnections) do
 		connection:Disconnect()
 	end

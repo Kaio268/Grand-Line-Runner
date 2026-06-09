@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
+local HudLayout = require(script.Parent.Parent:WaitForChild("HudLayout"))
 local Responsive = require(script.Parent.Parent:WaitForChild("Responsive"))
 local PreviewViewport = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Components"):WaitForChild("PreviewViewport"))
 local IndexTheme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
@@ -19,10 +20,6 @@ local BUTTON_BOTTOM_OFFSET = 156
 local BUTTON_HEIGHT = 78
 local BUTTON_MAX_SIZE = Vector2.new(372, BUTTON_HEIGHT)
 local BUTTON_MIN_SIZE = Vector2.new(268, 68)
-local IN_HAND_BOTTOM_OFFSET = 318
-local IN_HAND_HEIGHT = 136
-local IN_HAND_MAX_SIZE = Vector2.new(388, IN_HAND_HEIGHT)
-local IN_HAND_MIN_SIZE = Vector2.new(286, 122)
 local IN_HAND_PREVIEW_ASPECT_RATIO = 1.22
 local CREW_RARITY_ORDER = {
 	"Omega",
@@ -59,10 +56,6 @@ local warnedMissingCrewPreview = {}
 
 local function isCompactViewport()
 	return Responsive.isCompact()
-end
-
-local function isPhoneFitViewport()
-	return Responsive.isPhoneViewport(Responsive.getViewportSize())
 end
 
 local function useButtonState(enabled)
@@ -857,8 +850,10 @@ local function inHandSlot(props)
 end
 
 local function inHandCrewHud(props)
-	local compact = isCompactViewport()
-	local phoneFit = isPhoneFitViewport()
+	local layout = HudLayout.getCorridorInHandLayout(props.layoutMode, {
+		devilFruitRect = props.devilFruitRect,
+	})
+	local phoneFit = layout.phoneFit == true
 	local item = props.item or props.crewmate
 	local slots = if typeof(props.slots) == "table" then props.slots else nil
 	local selectedSlotKey = props.selectedSlotKey
@@ -890,25 +885,21 @@ local function inHandCrewHud(props)
 
 	return e("Frame", {
 		Active = false,
-		AnchorPoint = Vector2.new(1, 1),
+		AnchorPoint = layout.anchorPoint,
 		BackgroundColor3 = PALETTE.Glass,
 		BackgroundTransparency = 0.14,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,
-		Position = if phoneFit
-			then UDim2.new(1, -96, 1, -194)
-			else UDim2.new(1, compact and -140 or -24, 1, compact and -226 or -IN_HAND_BOTTOM_OFFSET),
-		Size = if phoneFit
-			then UDim2.new(0.2, 0, 0, 82)
-			else compact and UDim2.new(0.26, 0, 0, 104) or UDim2.new(0.32, 0, 0, IN_HAND_HEIGHT),
+		Position = layout.position,
+		Size = layout.size,
 		ZIndex = 42,
 	}, {
 		Scale = e("UIScale", {
-			Scale = if phoneFit then 0.62 else compact and 0.78 or 1,
+			Scale = layout.scale or 1,
 		}),
 		SizeLimit = e("UISizeConstraint", {
-			MaxSize = if phoneFit then Vector2.new(232, 82) else compact and Vector2.new(310, 104) or IN_HAND_MAX_SIZE,
-			MinSize = if phoneFit then Vector2.new(172, 72) else compact and Vector2.new(230, 94) or IN_HAND_MIN_SIZE,
+			MaxSize = layout.maxSize,
+			MinSize = layout.minSize,
 		}),
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 8),
@@ -965,6 +956,7 @@ end
 
 local function DropAction(props)
 	local visible = props.visible == true
+	local layoutMode = props.layoutMode or HudLayout.getMode()
 	local compact = isCompactViewport()
 	local carriedItem = props.carriedItem or props.carriedCrewMember
 	local carriedSlots = props.carriedSlots
@@ -1073,7 +1065,9 @@ local function DropAction(props)
 	}, {
 		CorridorInHandHud = if showInHandHud
 			then e(inHandCrewHud, {
+				devilFruitRect = props.devilFruitRect,
 				item = carriedItem,
+				layoutMode = layoutMode,
 				onSelectSlot = function(slot)
 					local slotKey = getCarrySlotKey(slot)
 					if slotKey ~= nil then

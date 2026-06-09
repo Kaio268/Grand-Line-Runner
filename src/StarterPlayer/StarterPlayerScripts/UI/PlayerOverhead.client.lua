@@ -46,6 +46,8 @@ local currencyConnections = {}
 local statusConnections = {}
 local nextPlayerKey = 0
 local billboardRegistrations = {}
+local viewportConnection
+local cameraConnection
 
 local function fireChanged()
 	changedEvent:Fire()
@@ -73,6 +75,18 @@ end
 local function registerExistingPortalBillboards()
 	for _, descendant in ipairs(portalHost:GetDescendants()) do
 		registerBillboardGui(descendant)
+	end
+end
+
+local function bindViewportConnection()
+	if viewportConnection then
+		viewportConnection:Disconnect()
+		viewportConnection = nil
+	end
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(fireChanged)
 	end
 end
 
@@ -406,7 +420,12 @@ local removingConnection = Players.PlayerRemoving:Connect(function(player)
 end)
 local portalBillboardAddedConnection = portalHost.DescendantAdded:Connect(registerBillboardGui)
 local portalBillboardRemovingConnection = portalHost.DescendantRemoving:Connect(unregisterBillboardGui)
+cameraConnection = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	bindViewportConnection()
+	fireChanged()
+end)
 
+bindViewportConnection()
 root:render(React.createElement(PlayerOverheadLayer))
 task.defer(registerExistingPortalBillboards)
 
@@ -415,6 +434,14 @@ script.Destroying:Connect(function()
 	removingConnection:Disconnect()
 	portalBillboardAddedConnection:Disconnect()
 	portalBillboardRemovingConnection:Disconnect()
+	if viewportConnection then
+		viewportConnection:Disconnect()
+		viewportConnection = nil
+	end
+	if cameraConnection then
+		cameraConnection:Disconnect()
+		cameraConnection = nil
+	end
 	for player in pairs(trackedPlayers) do
 		disconnectPlayer(player)
 	end

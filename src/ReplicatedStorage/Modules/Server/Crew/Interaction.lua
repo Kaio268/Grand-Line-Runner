@@ -1,6 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local PhysicsService = game:GetService("PhysicsService")
+local Players = game:GetService("Players")
 
 local Interaction = {}
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -1259,6 +1260,123 @@ end
 
 function Interaction.GetActiveContext()
 	return activeContext
+end
+
+local function incrementSnapshotCount(counts, key, amount)
+	local normalizedKey = tostring(key or "")
+	if normalizedKey == "" then
+		normalizedKey = "Unknown"
+	end
+	counts[normalizedKey] = (tonumber(counts[normalizedKey]) or 0) + (amount or 1)
+end
+
+local function appendSnapshotDetail(details, maxDetails, detail)
+	if #details >= maxDetails then
+		return
+	end
+	details[#details + 1] = detail
+end
+
+local function getPlayerNameByUserId(userId)
+	local numericUserId = tonumber(userId)
+	if not numericUserId then
+		return ""
+	end
+
+	local player = Players:GetPlayerByUserId(numericUserId)
+	return if player then player.Name else ""
+end
+
+function Interaction.GetActiveCrewSnapshot(options)
+	options = if typeof(options) == "table" then options else {}
+	local ctx = if typeof(options.Context) == "table" then options.Context else activeContext
+	local active = ctx and ctx.Active
+	local maxDetails = math.max(0, math.floor(tonumber(options.MaxDetails) or 60))
+	local snapshot = {
+		Total = 0,
+		WorldAvailableCount = 0,
+		Spawned = 0,
+		Held = 0,
+		Dropped = 0,
+		Tutorial = 0,
+		ByRarity = {},
+		ByVariant = {},
+		ByCrewMember = {},
+		ByStatus = {},
+		Details = {},
+	}
+
+	if typeof(active) ~= "table" then
+		return snapshot
+	end
+
+	for model, st in pairs(active) do
+		if model and model.Parent and typeof(st) == "table" then
+			local entry = if typeof(st.Entry) == "table" then st.Entry else {}
+			local info = if typeof(entry.Info) == "table" then entry.Info else {}
+			local rarity = normalizeCarriedAttribute(model:GetAttribute(OVERHEAD_ATTRIBUTES.Rarity))
+				or normalizeCarriedAttribute(info.Rarity)
+				or normalizeCarriedAttribute(entry.Rarity)
+				or "Common"
+			local variant = normalizeCarriedAttribute(model:GetAttribute(OVERHEAD_ATTRIBUTES.Variant))
+				or normalizeCarriedAttribute(info.Variant)
+				or normalizeCarriedAttribute(entry.Variant)
+				or "Normal"
+			local crewMemberId = normalizeCarriedAttribute(model:GetAttribute("CrewMemberId"))
+				or normalizeCarriedAttribute(info.CrewMemberId)
+				or normalizeCarriedAttribute(entry.Id)
+				or normalizeCarriedAttribute(model.Name)
+				or "Unknown"
+			local displayName = normalizeCarriedAttribute(model:GetAttribute(OVERHEAD_ATTRIBUTES.DisplayName))
+				or normalizeCarriedAttribute(model:GetAttribute("CrewMemberDisplayName"))
+				or normalizeCarriedAttribute(info.DisplayName or info.CrewMemberName or info.Name)
+				or crewMemberId
+			local isHeld = st.Held == true or model:GetAttribute(CARRIED_MODEL_ATTRIBUTE) == true
+			local isDropped = isHeld ~= true and ctx and ctx.DroppedFolder and model.Parent == ctx.DroppedFolder
+			local isTutorial = model:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) == true
+			local status = if isHeld
+				then "Held"
+				elseif isDropped then "Dropped"
+				elseif isTutorial then "Tutorial"
+				else "Spawned"
+
+			snapshot.Total += 1
+			if status == "Held" then
+				snapshot.Held += 1
+			elseif status == "Dropped" then
+				snapshot.Dropped += 1
+				snapshot.WorldAvailableCount += 1
+			elseif status == "Tutorial" then
+				snapshot.Tutorial += 1
+				snapshot.WorldAvailableCount += 1
+			else
+				snapshot.Spawned += 1
+				snapshot.WorldAvailableCount += 1
+			end
+
+			incrementSnapshotCount(snapshot.ByStatus, status)
+			incrementSnapshotCount(snapshot.ByRarity, rarity)
+			incrementSnapshotCount(snapshot.ByVariant, variant)
+			incrementSnapshotCount(snapshot.ByCrewMember, displayName)
+
+			appendSnapshotDetail(snapshot.Details, maxDetails, {
+				Kind = "PhysicalCrew",
+				RewardType = "Crew",
+				Status = status,
+				DisplayName = displayName,
+				CrewMemberId = crewMemberId,
+				Rarity = rarity,
+				Variant = variant,
+				HolderUserId = tonumber(st.HolderUserId) or 0,
+				HolderName = getPlayerNameByUserId(st.HolderUserId),
+				TimeRemainingSeconds = math.max(0, math.floor(tonumber(st.Remaining) or 0)),
+				WorldPath = model:GetFullName(),
+				SpawnPartPath = if st.OriginData and st.OriginData.Part then st.OriginData.Part:GetFullName() else "",
+			})
+		end
+	end
+
+	return snapshot
 end
 
 local function disconnectDeath(ctx, userId)

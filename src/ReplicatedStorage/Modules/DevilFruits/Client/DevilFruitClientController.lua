@@ -98,6 +98,9 @@ local cooldownHudComponent
 local react
 local reactRoblox
 local cooldownHudLastError
+local cooldownHudLayoutRefreshQueued = false
+local cooldownHudViewportConnection
+local cooldownHudCameraConnection
 local DEVIL_FRUIT_UI = {
 	Ready = Color3.fromRGB(116, 255, 161),
 	Active = Color3.fromRGB(116, 208, 255),
@@ -667,6 +670,37 @@ local function updateCooldownHud(_forceRebuild)
 	cooldownHud.CurrentFruit = fruitName
 	cooldownHud.Abilities = buildCooldownAbilities(fruitName)
 	renderCooldownHud()
+end
+
+local function requestCooldownHudLayoutRefresh()
+	if cooldownHudLayoutRefreshQueued then
+		return
+	end
+
+	cooldownHudLayoutRefreshQueued = true
+	task.defer(function()
+		cooldownHudLayoutRefreshQueued = false
+		updateCooldownHud(false)
+	end)
+end
+
+local function bindCooldownHudViewportUpdates()
+	if cooldownHudViewportConnection then
+		cooldownHudViewportConnection:Disconnect()
+		cooldownHudViewportConnection = nil
+	end
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		cooldownHudViewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(requestCooldownHudLayoutRefresh)
+	end
+
+	if not cooldownHudCameraConnection then
+		cooldownHudCameraConnection = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+			bindCooldownHudViewportUpdates()
+			requestCooldownHudLayoutRefresh()
+		end)
+	end
 end
 
 getFruitFolder = function()
@@ -1760,6 +1794,8 @@ local function initializeDevilFruitClient()
 	UserInputService:GetPropertyChangedSignal("KeyboardEnabled"):Connect(function()
 		updateCooldownHud(true)
 	end)
+
+	bindCooldownHudViewportUpdates()
 
 	player.ChildAdded:Connect(function(child)
 		if child.Name == "DevilFruit" then

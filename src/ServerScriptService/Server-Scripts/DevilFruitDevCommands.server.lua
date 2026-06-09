@@ -5858,7 +5858,11 @@ local function processSpawnCommand(player, argumentText, commandContext)
 
 	local rewardType = "Crew"
 	local depthBand = GrandLineRushEconomy.VerticalSlice.WorldRun.StartDepthBand or GrandLineRushEconomy.VerticalSlice.DefaultDepthBand
-	local response = GrandLineRushVerticalSliceService.StartRun(player, rewardType, depthBand)
+	local response = GrandLineRushVerticalSliceService.StartRun(player, rewardType, depthBand, {
+		SpawnSource = "AdminDebug",
+		SpawnedByUserId = player.UserId,
+		SpawnedByName = player.Name,
+	})
 	if response and response.ok then
 		print(string.format("[DevFruitDevCommands] %s spawned live %s reward via /spawn", player.Name, targetName))
 	else

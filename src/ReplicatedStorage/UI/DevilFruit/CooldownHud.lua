@@ -4,8 +4,10 @@ local Packages = ReplicatedStorage:WaitForChild("Packages")
 local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
+local BottomRightHudCoordinator = require(UiFolder:WaitForChild("Hud"):WaitForChild("BottomRightHudCoordinator"))
 
 local e = React.createElement
+local DEVIL_FRUIT_RESERVATION_KEY = "DevilFruit"
 
 local THEME = {
 	FruitBackgroundImage = "rbxassetid://134053886107384",
@@ -34,6 +36,44 @@ local function gradient(first, second)
 		}),
 		Rotation = 90,
 	})
+end
+
+local function getRectSignature(rect)
+	if typeof(rect) ~= "table" then
+		return "none"
+	end
+
+	return string.format(
+		"%.0f:%.0f:%.0f:%.0f",
+		tonumber(rect.x) or 0,
+		tonumber(rect.y) or 0,
+		tonumber(rect.width) or 0,
+		tonumber(rect.height) or 0
+	)
+end
+
+local function devilFruitReservationPublisher(props)
+	React.useEffect(function()
+		return function()
+			BottomRightHudCoordinator.ClearReservation(DEVIL_FRUIT_RESERVATION_KEY)
+		end
+	end, {})
+
+	React.useEffect(function()
+		if props.visible == true and typeof(props.rect) == "table" then
+			BottomRightHudCoordinator.SetReservation(DEVIL_FRUIT_RESERVATION_KEY, {
+				Padding = 12,
+				Priority = 0,
+				Rect = props.rect,
+				Source = DEVIL_FRUIT_RESERVATION_KEY,
+				Visible = true,
+			})
+		else
+			BottomRightHudCoordinator.ClearReservation(DEVIL_FRUIT_RESERVATION_KEY)
+		end
+	end, { props.visible, props.signature })
+
+	return nil
 end
 
 local function abilityRow(props)
@@ -202,7 +242,12 @@ end
 
 local function CooldownHud(props)
 	if props.visible ~= true then
-		return e(React.Fragment)
+		return e(React.Fragment, nil, {
+			DevilFruitReservation = e(devilFruitReservationPublisher, {
+				signature = "hidden",
+				visible = false,
+			}),
+		})
 	end
 
 	local layout = HudLayout.getDevilFruit(props.layoutMode)
@@ -271,26 +316,31 @@ local function CooldownHud(props)
 		then listInset + (#(props.abilities or {}) * rowHeight) + ((#(props.abilities or {}) - 1) * rowGap)
 		else (compact and 24 or 44)
 	local totalHeight = outerInset + topBarHeight + gap + listHeight + outerInset
-	local anchorPoint = layout.anchorPoint or Vector2.new(1, 1)
-	local position = layout.position
-	local stack = HudLayout.getMobileRightStack(props.layoutMode, {
-		devilFruitHeight = totalHeight,
+	local placement = HudLayout.getDevilFruitPlacement(props.layoutMode, {
+		height = totalHeight,
+		width = layout.width,
 	})
-	if stack then
-		anchorPoint = stack.devilFruit.anchorPoint
-		position = stack.devilFruit.position
-	end
+	local rootScale = tonumber(placement.scale) or 1
 
-	return e("Frame", {
-		AnchorPoint = anchorPoint,
+	return e(React.Fragment, nil, {
+		DevilFruitReservation = e(devilFruitReservationPublisher, {
+			rect = placement.rect,
+			signature = getRectSignature(placement.rect),
+			visible = true,
+		}),
+		Root = e("Frame", {
+		AnchorPoint = placement.anchorPoint,
 		BackgroundColor3 = THEME.PrimaryBg,
 		BackgroundTransparency = 0.03,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
-		Position = position,
-		Size = UDim2.fromOffset(layout.width, totalHeight),
+		Position = placement.position,
+		Size = UDim2.fromOffset(placement.width, totalHeight),
 		ZIndex = 30,
 	}, {
+		ResponsiveScale = rootScale ~= 1 and e("UIScale", {
+			Scale = rootScale,
+		}) or nil,
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 14),
 		}),
@@ -406,6 +456,7 @@ local function CooldownHud(props)
 				ZIndex = 3,
 			}, rows),
 		}),
+	}),
 	})
 end
 

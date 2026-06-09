@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 local EventController = require(ServerScriptService:WaitForChild("EventController"))
 local AdminPermissions = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AdminPermissions"))
+local CorridorRewardSnapshotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CorridorRewardSnapshotService"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local function getOrCreateRemote(name, className)
@@ -28,6 +29,7 @@ local adminStatusFunction = getOrCreateRemote("AdminStatusRequest", "RemoteFunct
 local adminRosterFunction = getOrCreateRemote("AdminRosterRequest", "RemoteFunction")
 local adminTesterRoleFunction = getOrCreateRemote("AdminTesterRoleRequest", "RemoteFunction")
 local adminConsoleActionFunction = getOrCreateRemote("AdminConsoleActionRequest", "RemoteFunction")
+local adminCorridorRewardsFunction = getOrCreateRemote("AdminCorridorRewardsRequest", "RemoteFunction")
 local adminRosterUpdatedEvent = getOrCreateRemote("AdminRosterUpdated")
 local requestEvent = getOrCreateRemote("AdminAnnouncementRequest")
 local broadcastEvent = getOrCreateRemote("AdminAnnouncementBroadcast")
@@ -163,6 +165,42 @@ adminConsoleActionFunction.OnServerInvoke = function(player, payload)
 	end
 
 	return AdminPermissions.ApplyAdminConsoleAction(player, payload)
+end
+
+adminCorridorRewardsFunction.OnServerInvoke = function(player)
+	if not RemoteGuard.Check(player, "AdminCorridorRewardsRequest", {}, {
+		Cooldown = 1,
+	}) then
+		return {
+			Success = false,
+			Message = "Reward snapshot request was rate limited.",
+		}
+	end
+
+	if not AdminPermissions.CanViewAdminConsole(player) then
+		AdminPermissions.LogCommandRejected(player, "corridorRewards", "AdminCorridorRewardsRequest", "reason=not_admin")
+		return {
+			Success = false,
+			Message = "Admin access required.",
+		}
+	end
+
+	local ok, snapshot = pcall(function()
+		return CorridorRewardSnapshotService.BuildSnapshot()
+	end)
+	if not ok or typeof(snapshot) ~= "table" then
+		AdminPermissions.LogCommandFailed(player, "corridorRewards", "AdminCorridorRewardsRequest", tostring(snapshot))
+		return {
+			Success = false,
+			Message = "Corridor reward snapshot unavailable.",
+		}
+	end
+
+	return {
+		Success = true,
+		Snapshot = snapshot,
+		Message = "Corridor reward snapshot updated.",
+	}
 end
 
 AdminPermissions.TesterStateChanged:Connect(function(_, payload)
