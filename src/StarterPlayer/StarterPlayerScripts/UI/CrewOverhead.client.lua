@@ -23,6 +23,8 @@ local CHEST_OVERHEAD_ATTRIBUTES = ChestOverhead.Attribute
 local CARRIED_MODEL_ATTRIBUTE = "CrewCarryHeld"
 local TRACK_KIND_CREW = "Crew"
 local TRACK_KIND_CHEST = "Chest"
+local CREW_OVERHEAD_MAX_DISTANCE = 260
+local CHEST_OVERHEAD_MAX_DISTANCE = 360
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactCrewOverheadRoot"
@@ -40,6 +42,7 @@ local trackedModels = {}
 local modelConnections = {}
 local nextModelKey = 0
 local billboardRegistrations = {}
+local changeQueued = false
 
 local function disconnectModel(model)
 	local connections = modelConnections[model]
@@ -53,7 +56,20 @@ local function disconnectModel(model)
 end
 
 local function fireChanged()
-	changedEvent:Fire()
+	if changeQueued then
+		return
+	end
+
+	changeQueued = true
+	task.defer(function()
+		changeQueued = false
+		local event = changedEvent
+		if event then
+			pcall(function()
+				event:Fire()
+			end)
+		end
+	end)
 end
 
 local function registerBillboardGui(instance)
@@ -104,6 +120,17 @@ local function getModelOverheadOffsetY(model)
 	return 4.6
 end
 
+local function getFocusPosition()
+	local character = player.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		return rootPart.Position
+	end
+
+	local camera = Workspace.CurrentCamera
+	return camera and camera.CFrame.Position or Vector3.zero
+end
+
 local function connectModel(model, trackKind)
 	if trackedModels[model] or not model:IsA("Model") then
 		return
@@ -137,12 +164,17 @@ end
 local function buildEntries(now)
 	local crewEntries = {}
 	local chestEntries = {}
+	local focusPosition = getFocusPosition()
 
 	for model, record in pairs(trackedModels) do
 		local adornee = getAdornee(model)
 		if adornee then
 			local key = tostring(record.key or "")
 			if record.trackKind == TRACK_KIND_CHEST then
+				if (adornee.Position - focusPosition).Magnitude > CHEST_OVERHEAD_MAX_DISTANCE then
+					continue
+				end
+
 				local kind = tostring(model:GetAttribute(CHEST_OVERHEAD_ATTRIBUTES.Kind) or "")
 				if kind ~= "" then
 					local despawnDeadline = tonumber(model:GetAttribute(CHEST_OVERHEAD_ATTRIBUTES.DespawnDeadlineUnix))
@@ -163,6 +195,11 @@ local function buildEntries(now)
 			else
 				local kind = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.Kind) or "")
 				if kind ~= "" then
+					local held = model:GetAttribute(CARRIED_MODEL_ATTRIBUTE) == true
+					if not held and (adornee.Position - focusPosition).Magnitude > CREW_OVERHEAD_MAX_DISTANCE then
+						continue
+					end
+
 					local expiresAt = tonumber(model:GetAttribute(OVERHEAD_ATTRIBUTES.ExpiresAt))
 					local variantAttribute = model:GetAttribute(OVERHEAD_ATTRIBUTES.Variant)
 					crewEntries[#crewEntries + 1] = {
@@ -179,7 +216,7 @@ local function buildEntries(now)
 						protectionType = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.ProtectionType) or "none"),
 						protectionLabel = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.ProtectionLabel) or ""),
 						protectionDetail = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.ProtectionDetail) or ""),
-						held = model:GetAttribute(CARRIED_MODEL_ATTRIBUTE) == true,
+						held = held,
 						remaining = if expiresAt then math.max(0, expiresAt - now) else nil,
 						despawnSeconds = tonumber(model:GetAttribute(OVERHEAD_ATTRIBUTES.DespawnSeconds)),
 					}

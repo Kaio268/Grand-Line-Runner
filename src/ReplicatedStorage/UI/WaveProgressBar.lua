@@ -288,43 +288,45 @@ local function WaveProgressBar(props)
 		waveMarkers["Wave" .. tostring(index)] = e(waveMarker, markerProps)
 	end
 
-	return e("ScreenGui", {
-		DisplayOrder = props.displayOrder or 18,
-		IgnoreGuiInset = true,
-		ResetOnSpawn = false,
-		ZIndexBehavior = Enum.ZIndexBehavior.Global,
-	}, {
-		Root = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0),
-			BackgroundTransparency = 1,
-			Position = UDim2.new(0.5, 0, 0, topOffset),
-			Size = UDim2.fromOffset(rootWidth, rootHeight),
-			ZIndex = 5,
+	return e(React.Fragment, nil, {
+		ReactWaveProgressBar = e("ScreenGui", {
+			DisplayOrder = props.displayOrder or 18,
+			IgnoreGuiInset = true,
+			ResetOnSpawn = false,
+			ZIndexBehavior = Enum.ZIndexBehavior.Global,
 		}, {
-			Constraint = e("UISizeConstraint", {
-				MaxSize = Vector2.new(tonumber(layout.maxWidth) or (compact and 620 or 980), rootHeight),
-				MinSize = Vector2.new(tonumber(layout.minWidth) or (compact and 320 or 560), rootHeight),
-			}),
-			Backdrop = e("Frame", {
-				BackgroundColor3 = Color3.fromRGB(11, 15, 24),
-				BackgroundTransparency = 0.1,
-				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(0, barY),
-				Size = UDim2.new(1, 0, 0, barHeight),
+			Root = e("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0),
+				BackgroundTransparency = 1,
+				Position = UDim2.new(0.5, 0, 0, topOffset),
+				Size = UDim2.fromOffset(rootWidth, rootHeight),
 				ZIndex = 5,
 			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 14),
+				Constraint = e("UISizeConstraint", {
+					MaxSize = Vector2.new(tonumber(layout.maxWidth) or (compact and 620 or 980), rootHeight),
+					MinSize = Vector2.new(tonumber(layout.minWidth) or (compact and 320 or 560), rootHeight),
 				}),
-				Stroke = e("UIStroke", {
-					Color = Color3.fromRGB(150, 170, 205),
-					Transparency = 0.5,
-					Thickness = 1.1,
+				Backdrop = e("Frame", {
+					BackgroundColor3 = Color3.fromRGB(11, 15, 24),
+					BackgroundTransparency = 0.1,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(0, barY),
+					Size = UDim2.new(1, 0, 0, barHeight),
+					ZIndex = 5,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0, 14),
+					}),
+					Stroke = e("UIStroke", {
+						Color = Color3.fromRGB(150, 170, 205),
+						Transparency = 0.5,
+						Thickness = 1.1,
+					}),
+					Segments = segmentRow(props),
 				}),
-				Segments = segmentRow(props),
+				WaveMarkers = e("Folder", nil, waveMarkers),
+				PlayerMarkers = e("Folder", nil, playerMarkers),
 			}),
-			Waves = e("Folder", nil, waveMarkers),
-			Players = e("Folder", nil, playerMarkers),
 		}),
 	})
 end

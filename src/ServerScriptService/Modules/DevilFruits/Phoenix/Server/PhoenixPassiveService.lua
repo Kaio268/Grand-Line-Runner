@@ -12,6 +12,12 @@ local DevilFruitConfig = require(
 local SharedDevilFruitModules = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared")
 local AnimationRegistry = require(SharedDevilFruitModules:WaitForChild("AnimationRegistry"))
 local DevilFruitRemotes = require(SharedDevilFruitModules:WaitForChild("DevilFruitRemotes"))
+local DevilFruitReplication = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("DevilFruitReplication")
+)
 local PhoenixShared = require(
 	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Phoenix"):WaitForChild("Shared"):WaitForChild("PhoenixShared")
 )
@@ -579,10 +585,14 @@ local function broadcastPhoenixRebirthEffect(player, state, reason, triggeredAt)
 	local remoteBundle = DevilFruitRemotes.GetBundle()
 	local reviveDelay = math.max(0, (state.ReviveAt or triggeredAt) - triggeredAt)
 	local duration = math.max(reviveDelay, (state.EndsAt or triggeredAt) - triggeredAt)
+	local rootPart = state.RootPart
+	local rootPosition = rootPart and rootPart:IsA("BasePart") and rootPart.Position or nil
 
-	remoteBundle.Effect:FireAllClients(player, PhoenixShared.FruitName, PHOENIX_REBIRTH_ABILITY, {
+	DevilFruitReplication.FireScoped(remoteBundle, player, PhoenixShared.FruitName, PHOENIX_REBIRTH_ABILITY, {
 		Phase = "Start",
 		Reason = reason,
+		OriginPosition = rootPosition,
+		ReplicationRadius = 900,
 		TriggeredAt = triggeredAt,
 		ReviveAt = state.ReviveAt,
 		ReviveDelay = reviveDelay,

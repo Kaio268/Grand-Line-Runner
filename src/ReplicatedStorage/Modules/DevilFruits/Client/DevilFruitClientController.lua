@@ -1733,9 +1733,107 @@ local function initializeDevilFruitClient()
 		end
 	end
 
+	local function readEffectPosition(value)
+		if typeof(value) == "Vector3" then
+			return value
+		end
+		if typeof(value) == "CFrame" then
+			return value.Position
+		end
+		return nil
+	end
+
+	local function getEffectOrigin(targetPlayer, payload)
+		if typeof(payload) == "table" then
+			local positionKeys = {
+				"OriginPosition",
+				"StartPosition",
+				"Position",
+				"RootPosition",
+				"TargetPosition",
+				"ImpactPosition",
+				"HitPosition",
+				"SpawnPosition",
+			}
+			for _, key in ipairs(positionKeys) do
+				local position = readEffectPosition(payload[key])
+				if position then
+					return position
+				end
+			end
+
+			local cframeKeys = { "OriginCFrame", "StartCFrame", "CFrame" }
+			for _, key in ipairs(cframeKeys) do
+				local position = readEffectPosition(payload[key])
+				if position then
+					return position
+				end
+			end
+		end
+
+		if targetPlayer and targetPlayer:IsA("Player") then
+			local character = targetPlayer.Character
+			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+			if rootPart and rootPart:IsA("BasePart") then
+				return rootPart.Position
+			end
+		end
+
+		return nil
+	end
+
+	local function shouldProcessEffect(targetPlayer, fruitName, abilityName, payload)
+		if targetPlayer == player then
+			return true
+		end
+		if
+			fruitName == INFERNO_FRUIT_NAME
+			and abilityName == "FlameDash"
+			and typeof(payload) == "table"
+			and payload.Phase == "Resolve"
+		then
+			return true
+		end
+		if typeof(payload) == "table" and payload.DisableDistanceCull == true then
+			return true
+		end
+
+		local origin = getEffectOrigin(targetPlayer, payload)
+		if not origin then
+			return true
+		end
+
+		local character = player.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if not rootPart or not rootPart:IsA("BasePart") then
+			return true
+		end
+
+		local maxDistance = 900
+		if typeof(payload) == "table" then
+			maxDistance = tonumber(payload.ClientMaxDistance)
+				or tonumber(payload.VisualRadius)
+				or tonumber(payload.ReplicationRadius)
+				or maxDistance
+		end
+
+		return (rootPart.Position - origin).Magnitude <= math.max(1, maxDistance)
+	end
+
 	local function handleEffectEvent(targetPlayer, fruitName, abilityName, payload)
 		local hasPlayerTarget = targetPlayer and targetPlayer:IsA("Player")
 		if not hasPlayerTarget and not isBomuLandMineWorldEffect(targetPlayer, fruitName, abilityName, payload) then
+			return
+		end
+		if hasPlayerTarget and fruitName == BURROW_FRUIT_NAME and abilityName == MOGU_BURROW_ABILITY then
+			local phase = payload and payload.Phase
+			if phase == "Resolve" then
+				effectRouter:HandleEffect(targetPlayer, fruitName, abilityName, payload)
+				stopMoguBurrow(targetPlayer, payload)
+				return
+			end
+		end
+		if not shouldProcessEffect(targetPlayer, fruitName, abilityName, payload) then
 			return
 		end
 
@@ -1744,10 +1842,6 @@ local function initializeDevilFruitClient()
 			if phase == "Start" then
 				startMoguBurrow(targetPlayer, payload)
 				effectRouter:HandleEffect(targetPlayer, fruitName, abilityName, payload)
-				return
-			elseif phase == "Resolve" then
-				effectRouter:HandleEffect(targetPlayer, fruitName, abilityName, payload)
-				stopMoguBurrow(targetPlayer, payload)
 				return
 			end
 		end

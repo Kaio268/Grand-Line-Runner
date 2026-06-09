@@ -79,6 +79,7 @@ local CONFIG = {
 	FallbackWarningTime = 3,
 	FallbackHoldTime = 2.5,
 	FallbackDamage = 65,
+	HoldScanInterval = 0.2,
 	KnockdownDuration = 0.8,
 	HazardClass = "minor",
 	HazardType = "deck_spikes",
@@ -272,6 +273,7 @@ local rng = Random.new()
 local activeControllers = {}
 local scheduledSpikeHolds = {}
 local spikeHoldTaskHandle = nil
+local spikeHoldScanElapsed = 0
 local dormantByCrewModel = setmetatable({}, { __mode = "k" })
 local normalLoopStarted = false
 local templateCacheByArea = {}
@@ -1485,28 +1487,48 @@ local function tweenVisual(controller, targetCFrame, duration, easingDirection)
 	end
 end
 
-local function damagePlayer(controller, player)
+local function buildSpikePlayerSnapshot()
+	local snapshot = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if humanoid and humanoid.Health > 0 and rootPart then
+			snapshot[#snapshot + 1] = {
+				Player = player,
+				Character = character,
+				Humanoid = humanoid,
+				RootPart = rootPart,
+				Position = rootPart.Position,
+			}
+		end
+	end
+	return snapshot
+end
+
+local function damagePlayer(controller, player, snapshotEntry)
 	if controller.DamagedPlayers[player] then
 		return false
 	end
 
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	local character = snapshotEntry and snapshotEntry.Character or player.Character
+	local humanoid = snapshotEntry and snapshotEntry.Humanoid or character and character:FindFirstChildOfClass("Humanoid")
+	local rootPart = snapshotEntry and snapshotEntry.RootPart or character and character:FindFirstChild("HumanoidRootPart")
 	if not humanoid or humanoid.Health <= 0 or not rootPart then
 		return false
 	end
 
-	if not isPointInsidePart(controller.Hitbox, rootPart.Position) then
+	local rootPosition = snapshotEntry and snapshotEntry.Position or rootPart.Position
+	if not isPointInsidePart(controller.Hitbox, rootPosition) then
 		return false
 	end
 
-	if not raycastGround(rootPart.Position, controller.Model.Parent) then
+	if not raycastGround(rootPosition, controller.Model.Parent) then
 		return false
 	end
 
 	local isHazardProtected = HazardProtection.IsProtected(player, {
-		Position = rootPart.Position,
+		Position = rootPosition,
 		HazardClass = CONFIG.HazardClass,
 		HazardType = CONFIG.HazardType,
 		Source = "DeckSpikes",
@@ -1522,7 +1544,7 @@ local function damagePlayer(controller, player)
 			Humanoid = humanoid,
 			RootPart = rootPart,
 		},
-		Position = rootPart.Position,
+		Position = rootPosition,
 		Source = "DeckSpikes",
 		Path = "SpikeRuntimeService.damagePlayer",
 	})
@@ -1547,9 +1569,9 @@ local function damagePlayer(controller, player)
 	return true
 end
 
-local function damagePlayersInside(controller)
-	for _, player in ipairs(Players:GetPlayers()) do
-		damagePlayer(controller, player)
+local function damagePlayersInside(controller, playerSnapshot)
+	for _, entry in ipairs(playerSnapshot or buildSpikePlayerSnapshot()) do
+		damagePlayer(controller, entry.Player, entry)
 	end
 end
 
@@ -1568,13 +1590,13 @@ local function ensureSpikeHoldTask()
 		Priority = 13,
 		Callback = function(dt)
 			local hasActive = false
+			spikeHoldScanElapsed += dt
 			for controller in pairs(scheduledSpikeHolds) do
 				if controller.Destroyed or not controller.Model.Parent then
 					scheduledSpikeHolds[controller] = nil
 				else
 					hasActive = true
 					controller.HoldElapsed = (tonumber(controller.HoldElapsed) or 0) + dt
-					damagePlayersInside(controller)
 					if controller.HoldElapsed >= (controller.HoldTime or CONFIG.FallbackHoldTime) then
 						scheduledSpikeHolds[controller] = nil
 						controller.Active = false
@@ -1584,7 +1606,21 @@ local function ensureSpikeHoldTask()
 				end
 			end
 
+			local scanInterval = math.max(0.08, tonumber(CONFIG.HoldScanInterval) or 0.2)
+			if spikeHoldScanElapsed >= scanInterval then
+				spikeHoldScanElapsed = 0
+				local playerSnapshot = buildSpikePlayerSnapshot()
+				if #playerSnapshot > 0 then
+					for controller in pairs(scheduledSpikeHolds) do
+						if not controller.Destroyed and controller.Model.Parent then
+							damagePlayersInside(controller, playerSnapshot)
+						end
+					end
+				end
+			end
+
 			if not hasActive then
+				spikeHoldScanElapsed = 0
 				return false
 			end
 			return true
@@ -1605,9 +1641,9 @@ local function scheduleSpikeHold(controller)
 					scheduledSpikeHolds[controller] = nil
 					return
 				end
-				local dt = task.wait()
+				local dt = task.wait(math.max(0.08, tonumber(CONFIG.HoldScanInterval) or 0.2))
 				controller.HoldElapsed += dt
-				damagePlayersInside(controller)
+				damagePlayersInside(controller, buildSpikePlayerSnapshot())
 			end
 
 			scheduledSpikeHolds[controller] = nil

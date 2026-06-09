@@ -26,6 +26,8 @@ local HORO_ATTRIBUTES = {
 	"HoroProjectionEndTime",
 }
 
+local PLAYER_OVERHEAD_MAX_DISTANCE = 300
+
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactPlayerOverheadRoot"
 
@@ -48,9 +50,23 @@ local nextPlayerKey = 0
 local billboardRegistrations = {}
 local viewportConnection
 local cameraConnection
+local changeQueued = false
 
 local function fireChanged()
-	changedEvent:Fire()
+	if changeQueued then
+		return
+	end
+
+	changeQueued = true
+	task.defer(function()
+		changeQueued = false
+		local event = changedEvent
+		if event then
+			pcall(function()
+				event:Fire()
+			end)
+		end
+	end)
 end
 
 local function registerBillboardGui(instance)
@@ -338,15 +354,32 @@ local function getHead(player)
 	return nil
 end
 
+local function getFocusPosition()
+	local character = localPlayer.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		return rootPart.Position
+	end
+
+	local camera = Workspace.CurrentCamera
+	return camera and camera.CFrame.Position or Vector3.zero
+end
+
 local function buildEntries(now)
 	local entries = {}
+	local focusPosition = getFocusPosition()
 
 	for player, key in pairs(trackedPlayers) do
 		local adornee = getHead(player)
 		if adornee then
-			local currencyValue = CurrencyUtil.findPrimaryValueObject(player)
 			local endTime = tonumber(player:GetAttribute("HoroProjectionEndTime"))
 			local horoActive = player:GetAttribute("HoroProjectionActive") == true
+			local alwaysVisible = player == localPlayer or horoActive and endTime ~= nil
+			if not alwaysVisible and (adornee.Position - focusPosition).Magnitude > PLAYER_OVERHEAD_MAX_DISTANCE then
+				continue
+			end
+
+			local currencyValue = CurrencyUtil.findPrimaryValueObject(player)
 			local leaderstats = player:FindFirstChild("leaderstats")
 			local rebirthsValue = leaderstats and leaderstats:FindFirstChild("Rebirths")
 			local potions = getStatusFolder(player)

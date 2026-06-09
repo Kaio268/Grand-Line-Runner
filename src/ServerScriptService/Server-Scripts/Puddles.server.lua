@@ -31,6 +31,8 @@ local CONFIG = {
 	MinSpawnStaggerDelay = 0.25,
 	MaxSpawnStaggerDelay = 0.9,
 	SlowRefreshDelay = 0.35,
+	SlowScanInterval = 0.3,
+	MaxSlowScanControllersPerTick = 18,
 	SlowDuration = 3,
 	FallbackSlowMultiplier = 0.50,
 	BiomeCount = 8,
@@ -207,6 +209,8 @@ local rng = Random.new()
 local activeControllers = {}
 local scheduledPuddleLifetimes = {}
 local puddleLifetimeTaskHandle = nil
+local puddleSlowScanElapsed = 0
+local puddleSlowScanCursor = 1
 local templateCacheByArea = {}
 local templateMetadataByTemplate = setmetatable({}, { __mode = "k" })
 local placementFailureCountsByArea = {}
@@ -1546,24 +1550,78 @@ local function bindPuddleTouchedSlow(controller)
 	end)
 end
 
-local function applySlowToPlayersInside(controller)
-	if not canApplyPuddleSlow(controller) then
-		return
-	end
-
-	local now = os.clock()
+local function buildPuddlePlayerSnapshot()
+	local snapshot = {}
 	for _, player in ipairs(Players:GetPlayers()) do
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-		if humanoid and humanoid.Health > 0 and rootPart and isPointInsidePart(controller.Hitbox, rootPart.Position) then
+		if humanoid and humanoid.Health > 0 and rootPart then
+			snapshot[#snapshot + 1] = {
+				Player = player,
+				Position = rootPart.Position,
+			}
+		end
+	end
+	return snapshot
+end
+
+local function applySlowToPlayersInside(controller, playerSnapshot, now)
+	if not canApplyPuddleSlow(controller) then
+		return
+	end
+
+	local resolvedNow = tonumber(now) or os.clock()
+	for _, entry in ipairs(playerSnapshot or buildPuddlePlayerSnapshot()) do
+		local player = entry.Player
+		if player and isPointInsidePart(controller.Hitbox, entry.Position) then
 			local lastSlow = controller.LastSlowByPlayer[player] or 0
-			if now - lastSlow >= CONFIG.SlowRefreshDelay then
-				controller.LastSlowByPlayer[player] = now
+			if resolvedNow - lastSlow >= CONFIG.SlowRefreshDelay then
+				controller.LastSlowByPlayer[player] = resolvedNow
 				applyPuddleSlow(controller, player)
 			end
 		end
 	end
+end
+
+local function collectActiveSlowControllers()
+	local controllers = {}
+	local now = os.clock()
+	for controller in pairs(scheduledPuddleLifetimes) do
+		if controller.Destroyed or not controller.Model.Parent then
+			scheduledPuddleLifetimes[controller] = nil
+		elseif not controller.FadingIn and now >= controller.FrozenUntil and canApplyPuddleSlow(controller) then
+			controllers[#controllers + 1] = controller
+		end
+	end
+	return controllers, now
+end
+
+local function scanPuddleSlows()
+	local controllers, now = collectActiveSlowControllers()
+	local controllerCount = #controllers
+	if controllerCount <= 0 then
+		puddleSlowScanCursor = 1
+		return
+	end
+
+	local playerSnapshot = buildPuddlePlayerSnapshot()
+	if #playerSnapshot <= 0 then
+		return
+	end
+
+	local maxPerTick = math.clamp(
+		math.floor(tonumber(CONFIG.MaxSlowScanControllersPerTick) or controllerCount),
+		1,
+		controllerCount
+	)
+	local startIndex = math.clamp(puddleSlowScanCursor, 1, controllerCount)
+	for offset = 0, maxPerTick - 1 do
+		local index = ((startIndex + offset - 1) % controllerCount) + 1
+		applySlowToPlayersInside(controllers[index], playerSnapshot, now)
+	end
+
+	puddleSlowScanCursor = ((startIndex + maxPerTick - 1) % controllerCount) + 1
 end
 
 local function ensurePuddleLifetimeTask()
@@ -1581,6 +1639,7 @@ local function ensurePuddleLifetimeTask()
 		Priority = 12,
 		Callback = function(dt)
 			local hasActive = false
+			puddleSlowScanElapsed += dt
 			for controller in pairs(scheduledPuddleLifetimes) do
 				if controller.Destroyed or not controller.Model.Parent then
 					scheduledPuddleLifetimes[controller] = nil
@@ -1588,7 +1647,6 @@ local function ensurePuddleLifetimeTask()
 					hasActive = true
 					if not controller.FadingIn and os.clock() >= controller.FrozenUntil then
 						controller.ActiveLifetimeElapsed = (tonumber(controller.ActiveLifetimeElapsed) or 0) + dt
-						applySlowToPlayersInside(controller)
 						if controller.ActiveLifetimeElapsed >= CONFIG.ActiveLifetime then
 							scheduledPuddleLifetimes[controller] = nil
 							controller:Destroy()
@@ -1597,7 +1655,15 @@ local function ensurePuddleLifetimeTask()
 				end
 			end
 
+			local scanInterval = math.max(0.2, tonumber(CONFIG.SlowScanInterval) or 0.3)
+			if puddleSlowScanElapsed >= scanInterval then
+				puddleSlowScanElapsed = 0
+				scanPuddleSlows()
+			end
+
 			if not hasActive then
+				puddleSlowScanElapsed = 0
+				puddleSlowScanCursor = 1
 				return false
 			end
 			return true
@@ -1620,9 +1686,9 @@ local function scheduleActiveLifetime(controller)
 				end
 
 				if not controller.FadingIn and os.clock() >= controller.FrozenUntil then
-					local dt = task.wait()
+					local dt = task.wait(math.max(0.2, tonumber(CONFIG.SlowScanInterval) or 0.3))
 					controller.ActiveLifetimeElapsed += dt
-					applySlowToPlayersInside(controller)
+					applySlowToPlayersInside(controller, buildPuddlePlayerSnapshot(), os.clock())
 				else
 					task.wait(0.05)
 				end

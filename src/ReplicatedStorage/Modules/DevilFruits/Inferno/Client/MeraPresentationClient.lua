@@ -55,6 +55,11 @@ local FLAME_DASH_PREDICTED_FINALIZE_TIMEOUT = 0.75
 local FLAME_DASH_END_HINT_DISTANCE_TOLERANCE = 2.5
 local FLAME_DASH_ACTIVE_MARKERS = { "Jump", "DashStart", "DashActive", "DashLoop", "Dash", "Swipe" }
 local FLAME_DASH_END_MARKERS = { "DashEnd", "End", "Launch", "Complete", "Stop" }
+local FLAME_DASH_VFX_QUALITY_FULL = "Full"
+local FLAME_DASH_VFX_QUALITY_MEDIUM = "Medium"
+local FLAME_DASH_VFX_QUALITY_CHEAP = "Cheap"
+local FLAME_DASH_MEDIUM_DISTANCE = 450
+local FLAME_DASH_CHEAP_DISTANCE = 700
 local ANIMATION_FAILURE_RETRY_COOLDOWN = 10
 local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.MeraPresentationClient"
 
@@ -145,6 +150,20 @@ local function getPlayerRootPart(targetPlayer)
 	end
 
 	return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function normalizeFlameDashVfxQuality(value)
+	local normalized = string.lower(tostring(value or ""))
+	if normalized == "full" or normalized == "high" or normalized == "caster" then
+		return FLAME_DASH_VFX_QUALITY_FULL
+	end
+	if normalized == "medium" or normalized == "near" then
+		return FLAME_DASH_VFX_QUALITY_MEDIUM
+	end
+	if normalized == "cheap" or normalized == "low" or normalized == "far" then
+		return FLAME_DASH_VFX_QUALITY_CHEAP
+	end
+	return nil
 end
 
 local function formatVector3(value)
@@ -1023,6 +1042,43 @@ function MeraPresentationClient:ShouldSuppressReplicatedFlameDashAudio(targetPla
 	return false
 end
 
+function MeraPresentationClient:ResolveFlameDashVfxQuality(targetPlayer, payload)
+	if targetPlayer == self.player then
+		return FLAME_DASH_VFX_QUALITY_FULL
+	end
+
+	local payloadQuality = type(payload) == "table" and normalizeFlameDashVfxQuality(payload.VfxQuality) or nil
+	if payloadQuality then
+		return payloadQuality
+	end
+
+	local origin = type(payload) == "table"
+		and (typeof(payload.OriginPosition) == "Vector3" and payload.OriginPosition
+			or typeof(payload.StartPosition) == "Vector3" and payload.StartPosition
+			or nil)
+		or nil
+	local localRootPart = getPlayerRootPart(self.player)
+	if origin and localRootPart then
+		local distance = (localRootPart.Position - origin).Magnitude
+		if distance <= FLAME_DASH_MEDIUM_DISTANCE then
+			return FLAME_DASH_VFX_QUALITY_MEDIUM
+		end
+		if distance <= FLAME_DASH_CHEAP_DISTANCE then
+			return FLAME_DASH_VFX_QUALITY_CHEAP
+		end
+		return FLAME_DASH_VFX_QUALITY_CHEAP
+	end
+
+	return FLAME_DASH_VFX_QUALITY_MEDIUM
+end
+
+function MeraPresentationClient:GetFlameDashVfxOptions(state)
+	local quality = normalizeFlameDashVfxQuality(state and state.VfxQuality) or FLAME_DASH_VFX_QUALITY_MEDIUM
+	return {
+		VfxQuality = quality,
+	}
+end
+
 function MeraPresentationClient:PlayFlameDashDashAudio(targetPlayer, payload, isPredicted, isCurrent)
 	local played = playMeraAbilityAudio(
 		self,
@@ -1082,6 +1138,10 @@ function MeraPresentationClient:RefreshFlameDashState(state, payload, rootPart)
 	end
 
 	if typeof(payload) == "table" then
+		local quality = self:ResolveFlameDashVfxQuality(state.TargetPlayer, payload)
+		if quality then
+			state.VfxQuality = quality
+		end
 		if typeof(payload.EndPosition) == "Vector3" then
 			state.ExpectedEndPosition = payload.EndPosition
 		end
@@ -1124,6 +1184,7 @@ function MeraPresentationClient:PlayFlameDashStage(targetPlayer, state, stageNam
 
 	local normalizedStage = string.lower(tostring(stageName or ""))
 	local stageSource = tostring(source or "unknown")
+	local vfxOptions = self:GetFlameDashVfxOptions(state)
 	if normalizedStage == "startup" then
 		if state.StartupPlayed then
 			return false
@@ -1152,6 +1213,7 @@ function MeraPresentationClient:PlayFlameDashStage(targetPlayer, state, stageNam
 				or (typeof(state.StartPosition) == "Vector3" and state.StartPosition)
 				or (typeof(state.ServerStartPosition) == "Vector3" and state.ServerStartPosition)
 				or rootPart.Position,
+			VfxQuality = vfxOptions.VfxQuality,
 		})
 		state.RuntimeState = state.StartupState
 		updateFlameDashVfxSnapshot(state, startupPosition, startupProgressDistance)
@@ -1174,12 +1236,13 @@ function MeraPresentationClient:PlayFlameDashStage(targetPlayer, state, stageNam
 		local activeDirection = rootPart.CFrame.LookVector
 		local activeProgressDistance = getLiveFlameDashVfxProgressDistance(state, activePosition, activeDirection)
 		logMove("move=FlameDash phase=DashActive received player=%s source=%s", targetPlayer.Name, stageSource)
-		if state.TrailSamplingStopped ~= true then
+		if state.TrailSamplingStopped ~= true and vfxOptions.VfxQuality ~= FLAME_DASH_VFX_QUALITY_CHEAP then
 			state.PartState = MeraVfx.StartFlameDashPart({
 				RootPart = rootPart,
 				Direction = activeDirection or getLatchedFlameDashVfxDirection(state, rootPart, nil),
 				Position = activePosition,
 				RuntimeState = state.RuntimeState or state.StartupState or state.HeadState or state.PartState,
+				VfxQuality = vfxOptions.VfxQuality,
 			})
 		end
 
@@ -1188,6 +1251,7 @@ function MeraPresentationClient:PlayFlameDashStage(targetPlayer, state, stageNam
 			Direction = activeDirection or getLatchedFlameDashVfxDirection(state, rootPart, nil),
 			Position = activePosition,
 			RuntimeState = state.RuntimeState or state.StartupState or state.HeadState or state.PartState,
+			VfxQuality = vfxOptions.VfxQuality,
 		})
 		state.RuntimeState = state.HeadState or state.PartState or state.RuntimeState
 
@@ -1921,7 +1985,9 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 	local preferredVisualDirection = getPayloadVisualDirection(payload)
 	local resolvedDirection = resolveDashDirection(rootPart, preferredDirection)
 	local resolvedVisualDirection = resolveFacingDirection(rootPart, preferredVisualDirection)
+	local vfxQuality = self:ResolveFlameDashVfxQuality(targetPlayer, payload)
 	local state = {
+		TargetPlayer = targetPlayer,
 		RootPart = rootPart,
 		Character = character,
 		Humanoid = humanoid,
@@ -1946,6 +2012,7 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 		ActualDuration = nil,
 		ResolveReason = nil,
 		StartPayload = typeof(payload) == "table" and payload or nil,
+		VfxQuality = vfxQuality,
 		IsPredicted = false,
 		ActiveDelay = computeFlameDashActiveDelay(self:GetAbilityConfig("FlameDash")),
 		ActiveStartedAt = nil,
@@ -2017,9 +2084,11 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 			updateFlameDashVfxSnapshot(state, currentVfxPosition, currentVfxProgressDistance)
 		end
 
+		local updateVfxOptions = self:GetFlameDashVfxOptions(state)
 		if state.HeadState and not MeraVfx.UpdateFlameDashHead(state.HeadState, {
 			Direction = currentVfxDirection or getLatchedFlameDashVfxDirection(state, rootPart, currentDirection),
 			Position = currentVfxPosition,
+			VfxQuality = updateVfxOptions.VfxQuality,
 		}) then
 			self:StopFlameDashRuntimeStage("Head", state.HeadState, {
 				ImmediateCleanup = true,
@@ -2030,6 +2099,7 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 		if state.PartState and not MeraVfx.UpdateFlameDashPart(state.PartState, {
 			Direction = currentVfxDirection or getLatchedFlameDashVfxDirection(state, rootPart, currentDirection),
 			Position = currentVfxPosition,
+			VfxQuality = updateVfxOptions.VfxQuality,
 		}) then
 			self:StopFlameDashRuntimeStage("Part", state.PartState, {
 				ImmediateCleanup = true,

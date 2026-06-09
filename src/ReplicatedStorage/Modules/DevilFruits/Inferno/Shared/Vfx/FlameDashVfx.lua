@@ -65,13 +65,80 @@ local TRAIL_RATE_DECAY_STAGES = {
 }
 local DEFAULT_MAX_TRAIL_CLONES_PER_STEP = math.max(
 	1,
-	math.floor(tonumber(FLAME_DASH_CONFIG.MaxTrailClonesPerStep) or 6)
+	math.min(3, math.floor(tonumber(FLAME_DASH_CONFIG.MaxTrailClonesPerStep) or 3))
 )
+local DEFAULT_MAX_ACTIVE_TRAIL_CLONES = math.max(
+	6,
+	math.min(36, math.floor(tonumber(FLAME_DASH_CONFIG.MaxActiveTrailClones) or 30))
+)
+local VFX_QUALITY_FULL = "Full"
+local VFX_QUALITY_MEDIUM = "Medium"
+local VFX_QUALITY_CHEAP = "Cheap"
+local QUALITY_SETTINGS = {
+	[VFX_QUALITY_FULL] = {
+		TrailSpacing = math.max(0.3, tonumber(FLAME_DASH_CONFIG.FullTrailCloneSpacing) or 0.7),
+		MaxTrailClonesPerStep = math.max(
+			1,
+			math.min(5, math.floor(tonumber(FLAME_DASH_CONFIG.FullMaxTrailClonesPerStep) or 5))
+		),
+		MaxActiveTrailClones = math.max(
+			8,
+			math.min(56, math.floor(tonumber(FLAME_DASH_CONFIG.FullMaxActiveTrailClones) or 56))
+		),
+		TrailEmitterRateScale = math.clamp(tonumber(FLAME_DASH_CONFIG.FullTrailEmitterRateScale) or 1, 0, 1.5),
+		HeadEmitterRateScale = math.clamp(tonumber(FLAME_DASH_CONFIG.FullHeadEmitterRateScale) or 1, 0, 1.5),
+		SpawnGroundTrailClones = true,
+		MaxPooledTrailClones = math.max(
+			4,
+			math.min(28, math.floor(tonumber(FLAME_DASH_CONFIG.FullMaxPooledTrailClones) or 24))
+		),
+	},
+	[VFX_QUALITY_MEDIUM] = {
+		TrailSpacing = math.max(0.3, tonumber(FLAME_DASH_CONFIG.MediumTrailCloneSpacing) or DEFAULT_TRAIL_SPACING),
+		MaxTrailClonesPerStep = math.max(
+			1,
+			math.min(3, math.floor(tonumber(FLAME_DASH_CONFIG.MediumMaxTrailClonesPerStep) or DEFAULT_MAX_TRAIL_CLONES_PER_STEP))
+		),
+		MaxActiveTrailClones = math.max(
+			6,
+			math.min(36, math.floor(tonumber(FLAME_DASH_CONFIG.MediumMaxActiveTrailClones) or DEFAULT_MAX_ACTIVE_TRAIL_CLONES))
+		),
+		TrailEmitterRateScale = math.clamp(tonumber(FLAME_DASH_CONFIG.MediumTrailEmitterRateScale) or 0.72, 0, 1),
+		HeadEmitterRateScale = math.clamp(tonumber(FLAME_DASH_CONFIG.MediumHeadEmitterRateScale) or 0.82, 0, 1),
+		SpawnGroundTrailClones = true,
+		MaxPooledTrailClones = math.max(
+			4,
+			math.min(20, math.floor(tonumber(FLAME_DASH_CONFIG.MediumMaxPooledTrailClones) or 16))
+		),
+	},
+	[VFX_QUALITY_CHEAP] = {
+		TrailSpacing = math.max(0.3, tonumber(FLAME_DASH_CONFIG.CheapTrailCloneSpacing) or 1.4),
+		MaxTrailClonesPerStep = math.max(
+			1,
+			math.min(1, math.floor(tonumber(FLAME_DASH_CONFIG.CheapMaxTrailClonesPerStep) or 1))
+		),
+		MaxActiveTrailClones = math.max(
+			4,
+			math.min(12, math.floor(tonumber(FLAME_DASH_CONFIG.CheapMaxActiveTrailClones) or 10))
+		),
+		TrailEmitterRateScale = math.clamp(tonumber(FLAME_DASH_CONFIG.CheapTrailEmitterRateScale) or 0.22, 0, 0.5),
+		HeadEmitterRateScale = math.clamp(tonumber(FLAME_DASH_CONFIG.CheapHeadEmitterRateScale) or 0.42, 0, 0.7),
+		SpawnGroundTrailClones = false,
+		MaxPooledTrailClones = math.max(
+			2,
+			math.min(12, math.floor(tonumber(FLAME_DASH_CONFIG.CheapMaxPooledTrailClones) or 8))
+		),
+	},
+}
 local DEFAULT_LOCAL_OFFSET = CFrame.Angles(0, math.rad(90), 0)
 local DEFAULT_DIRECTION = Vector3.new(0, 0, -1)
 local CLEANUP_BUFFER = 1.0
 local FOLLOW_WELD_NAME = "MeraFlameDashFollowWeld"
 local TRAIL_CLONE_NAME = "FlameDashTrailClone"
+local TRAIL_CLONE_POOL_TOTAL_LIMIT = math.max(
+	8,
+	math.min(64, math.floor(tonumber(FLAME_DASH_CONFIG.MaxPooledTrailClonesTotal) or 48))
+)
 local LOG_PREFIX = "[flamedash]"
 
 local MAX_TRAIL_CLONE_STREAM_RATE = math.max(
@@ -123,6 +190,10 @@ local ALWAYS_DISABLED_HEAD_EMITTER_NAMES = {
 local runtimeSequence = 0
 local activeTrailLoopCount = 0
 local trailTaskSerial = 0
+local trailCloneLifecycleSerial = 0
+local pooledTrailCloneCount = 0
+local trailClonePoolsByKey = {}
+local trailCloneTokens = setmetatable({}, { __mode = "k" })
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -167,6 +238,21 @@ local function emitterKey(name)
 	end
 
 	return string.lower(name)
+end
+
+local function normalizeVfxQuality(value)
+	local normalized = string.lower(tostring(value or ""))
+	if normalized == "full" or normalized == "high" or normalized == "caster" then
+		return VFX_QUALITY_FULL
+	end
+	if normalized == "cheap" or normalized == "low" or normalized == "far" then
+		return VFX_QUALITY_CHEAP
+	end
+	return VFX_QUALITY_MEDIUM
+end
+
+local function getQualitySettings(quality)
+	return QUALITY_SETTINGS[normalizeVfxQuality(quality)] or QUALITY_SETTINGS[VFX_QUALITY_MEDIUM]
 end
 
 local function buildDisabledEmitterNameSet()
@@ -822,6 +908,7 @@ local function resolveHeadEmitterRate(state, emitter)
 		return 0, false
 	end
 
+	rate *= math.max(0, tonumber(state.HeadEmitterRateScale) or 1)
 	return math.min(rate, MAX_ACTIVE_HEAD_STREAM_RATE), true
 end
 
@@ -866,7 +953,7 @@ end
 -- silent on the runtime clone. It exists only to be cloned behind the player.
 -- ============================================================================
 
-local function resolveTrailCloneEmitterRate(emitter)
+local function resolveTrailCloneEmitterRate(state, emitter)
 	local key = emitterKey(emitter.Name)
 	if not isTrailVisualEmitterName(key) then
 		return 0, false
@@ -888,14 +975,103 @@ local function resolveTrailCloneEmitterRate(emitter)
 		return 0, false
 	end
 
+	rate *= math.max(0, tonumber(state and state.TrailEmitterRateScale) or 1)
 	return math.min(rate, MAX_TRAIL_CLONE_STREAM_RATE), true
 end
 
-local function configureTrailClone(root)
+local function configureTrailClone(root, state)
 	hideTrailRenderableObjects(root)
-	local enabledCount, totalRate, enabledEmitters = configureParticleEmitters(root, resolveTrailCloneEmitterRate)
+	local enabledCount, totalRate, enabledEmitters = configureParticleEmitters(root, function(emitter)
+		return resolveTrailCloneEmitterRate(state, emitter)
+	end)
 	setAuxVisualsEnabled(root, true, false)
 	return enabledCount, totalRate, enabledEmitters
+end
+
+local function nextTrailCloneToken()
+	trailCloneLifecycleSerial += 1
+	return string.format("trail-%04d", trailCloneLifecycleSerial)
+end
+
+local function getTrailClonePoolKey(state, cloneName)
+	local templatePath = state and state.TrailTemplateRoot and safeGetFullName(state.TrailTemplateRoot) or "<missing>"
+	return table.concat({
+		templatePath,
+		normalizeVfxQuality(state and state.VfxQuality),
+		tostring(cloneName or TRAIL_CLONE_NAME),
+	}, "|")
+end
+
+local function acquireTrailCloneRoot(state, cloneName)
+	local poolKey = getTrailClonePoolKey(state, cloneName)
+	local pool = trailClonePoolsByKey[poolKey]
+	while pool and #pool > 0 do
+		local trailClone = table.remove(pool)
+		pooledTrailCloneCount = math.max(0, pooledTrailCloneCount - 1)
+		if trailClone then
+			local ok = pcall(function()
+				trailClone.Name = type(cloneName) == "string" and cloneName or TRAIL_CLONE_NAME
+				trailClone.Parent = Workspace
+			end)
+			if ok and trailClone.Parent == Workspace then
+				return trailClone, poolKey
+			end
+			pcall(function()
+				trailClone:Destroy()
+			end)
+		end
+	end
+
+	local ok, trailClone = pcall(function()
+		return state.TrailTemplateRoot:Clone()
+	end)
+	if not ok or not trailClone then
+		return nil, poolKey
+	end
+
+	trailClone.Name = type(cloneName) == "string" and cloneName or TRAIL_CLONE_NAME
+	trailClone.Parent = Workspace
+	return trailClone, poolKey
+end
+
+local function recycleTrailCloneRoot(state, trailClone, poolKey, cloneName)
+	if not trailClone or trailClone.Parent == nil then
+		return false
+	end
+
+	trailCloneTokens[trailClone] = nil
+	disableVisuals(trailClone)
+	setAuxVisualsEnabled(trailClone, false, false)
+	setPartsWorldSafe(trailClone, true)
+
+	local maxPoolSize = math.max(0, math.floor(tonumber(state and state.MaxPooledTrailClones) or 0))
+	if maxPoolSize <= 0 or pooledTrailCloneCount >= TRAIL_CLONE_POOL_TOTAL_LIMIT then
+		trailClone:Destroy()
+		return false
+	end
+
+	local pool = trailClonePoolsByKey[poolKey]
+	if not pool then
+		pool = {}
+		trailClonePoolsByKey[poolKey] = pool
+	end
+	if #pool >= maxPoolSize then
+		trailClone:Destroy()
+		return false
+	end
+
+	local ok = pcall(function()
+		trailClone.Name = tostring(cloneName or TRAIL_CLONE_NAME) .. "Pooled"
+		trailClone.Parent = nil
+	end)
+	if not ok then
+		trailClone:Destroy()
+		return false
+	end
+
+	pool[#pool + 1] = trailClone
+	pooledTrailCloneCount += 1
+	return true
 end
 
 local function applyEmitterRateScale(emitterStates, rateScale)
@@ -909,7 +1085,7 @@ local function applyEmitterRateScale(emitterStates, rateScale)
 	end
 end
 
-local function scheduleTrailCloneRateDecay(trailClone, emitterStates, lifetime)
+local function scheduleTrailCloneRateDecay(trailClone, emitterStates, lifetime, lifecycleToken)
 	if not trailClone or trailClone.Parent == nil or #emitterStates == 0 then
 		return
 	end
@@ -918,7 +1094,7 @@ local function scheduleTrailCloneRateDecay(trailClone, emitterStates, lifetime)
 		local delayTime = math.max(0, lifetime * math.max(0, tonumber(stage.TimeFraction) or 0))
 		local rateScale = math.max(0, tonumber(stage.RateScale) or 0)
 		task.delay(delayTime, function()
-			if trailClone and trailClone.Parent then
+			if trailClone and trailClone.Parent and trailCloneTokens[trailClone] == lifecycleToken then
 				applyEmitterRateScale(emitterStates, rateScale)
 			end
 		end)
@@ -951,17 +1127,16 @@ local function spawnTrailCloneRoot(state, spawnCFrame, cloneName)
 	if not isLiveState(state) or not state.TrailTemplateRoot or typeof(spawnCFrame) ~= "CFrame" then
 		return nil
 	end
-
-	local ok, trailClone = pcall(function()
-		return state.TrailTemplateRoot:Clone()
-	end)
-	if not ok or not trailClone then
+	if (tonumber(state.ActiveTrailClones) or 0) >= (tonumber(state.MaxActiveTrailClones) or DEFAULT_MAX_ACTIVE_TRAIL_CLONES) then
 		return nil
 	end
 
-	trailClone.Name = type(cloneName) == "string" and cloneName or TRAIL_CLONE_NAME
+	local trailClone, poolKey = acquireTrailCloneRoot(state, cloneName)
+	if not trailClone then
+		return nil
+	end
+
 	destroyNamedWelds(trailClone)
-	trailClone.Parent = Workspace
 	setPartsWorldSafe(trailClone, true)
 
 	local cloneAnchor = resolveInstanceBySegments(trailClone, state.TrailTemplateAnchorSegments)
@@ -975,22 +1150,49 @@ local function spawnTrailCloneRoot(state, spawnCFrame, cloneName)
 		return nil
 	end
 
-	local enabledCount, totalRate, enabledEmitters = configureTrailClone(trailClone)
+	local enabledCount, totalRate, enabledEmitters = configureTrailClone(trailClone, state)
 	if enabledCount <= 0 then
 		trailClone:Destroy()
 		return nil
 	end
 
 	local lifetime = state.TrailLifetime
-	scheduleTrailCloneRateDecay(trailClone, enabledEmitters, lifetime)
+	local lifecycleToken = nextTrailCloneToken()
+	trailCloneTokens[trailClone] = lifecycleToken
+	state.ActiveTrailClones = (tonumber(state.ActiveTrailClones) or 0) + 1
+	local counted = true
+	local destroyingConnection = nil
+	local function releaseTrailCloneCount()
+		if not counted then
+			return
+		end
+		counted = false
+		if destroyingConnection then
+			destroyingConnection:Disconnect()
+			destroyingConnection = nil
+		end
+		if type(state) == "table" then
+			state.ActiveTrailClones = math.max(0, (tonumber(state.ActiveTrailClones) or 1) - 1)
+		end
+	end
+	destroyingConnection = trailClone.Destroying:Connect(function()
+		trailCloneTokens[trailClone] = nil
+		releaseTrailCloneCount()
+	end)
+	scheduleTrailCloneRateDecay(trailClone, enabledEmitters, lifetime, lifecycleToken)
 	task.delay(lifetime * DEFAULT_TRAIL_DISABLE_FRACTION, function()
-		if trailClone and trailClone.Parent then
+		if trailClone and trailClone.Parent and trailCloneTokens[trailClone] == lifecycleToken then
 			disableVisuals(trailClone)
 			setAuxVisualsEnabled(trailClone, false, false)
 		end
 	end)
-
-	Debris:AddItem(trailClone, lifetime + CLEANUP_BUFFER)
+	task.delay(lifetime + CLEANUP_BUFFER, function()
+		if trailCloneTokens[trailClone] ~= lifecycleToken then
+			return
+		end
+		releaseTrailCloneCount()
+		recycleTrailCloneRoot(state, trailClone, poolKey, cloneName)
+	end)
 	return trailClone, enabledCount, totalRate
 end
 
@@ -1012,7 +1214,9 @@ local function spawnTrailCloneAt(state, samplePosition, direction)
 		return nil
 	end
 
-	local groundSpawnPosition = resolveGroundTrailPosition(state, airSpawnPosition)
+	local groundSpawnPosition = if state.SpawnGroundTrailClones == false
+		then nil
+		else resolveGroundTrailPosition(state, airSpawnPosition)
 	if groundSpawnPosition then
 		local middleSpawnPosition = airSpawnPosition:Lerp(groundSpawnPosition, 0.5)
 		local middleSpawnCFrame = CFrame.lookAt(
@@ -1190,6 +1394,17 @@ local function applyRuntimeOptions(state, options)
 		return
 	end
 
+	local quality = normalizeVfxQuality(options.VfxQuality or options.Quality or options.TrailQuality or state.VfxQuality)
+	local qualitySettings = getQualitySettings(quality)
+	state.VfxQuality = quality
+	state.TrailSpacing = qualitySettings.TrailSpacing or DEFAULT_TRAIL_SPACING
+	state.MaxTrailClonesPerStep = qualitySettings.MaxTrailClonesPerStep or DEFAULT_MAX_TRAIL_CLONES_PER_STEP
+	state.MaxActiveTrailClones = qualitySettings.MaxActiveTrailClones or DEFAULT_MAX_ACTIVE_TRAIL_CLONES
+	state.TrailEmitterRateScale = qualitySettings.TrailEmitterRateScale or 1
+	state.HeadEmitterRateScale = qualitySettings.HeadEmitterRateScale or 1
+	state.SpawnGroundTrailClones = qualitySettings.SpawnGroundTrailClones ~= false
+	state.MaxPooledTrailClones = qualitySettings.MaxPooledTrailClones or 0
+
 	if typeof(options.LocalOffset) == "CFrame" then
 		state.LocalOffset = options.LocalOffset
 	end
@@ -1215,7 +1430,19 @@ local function applyRuntimeOptions(state, options)
 	end
 
 	if tonumber(options.MaxTrailClonesPerStep) then
-		state.MaxTrailClonesPerStep = math.max(1, math.floor(tonumber(options.MaxTrailClonesPerStep)))
+		state.MaxTrailClonesPerStep = math.clamp(
+			math.floor(tonumber(options.MaxTrailClonesPerStep)),
+			1,
+			qualitySettings.MaxTrailClonesPerStep or DEFAULT_MAX_TRAIL_CLONES_PER_STEP
+		)
+	end
+
+	if tonumber(options.MaxActiveTrailClones) then
+		state.MaxActiveTrailClones = math.clamp(
+			math.floor(tonumber(options.MaxActiveTrailClones)),
+			4,
+			qualitySettings.MaxActiveTrailClones or DEFAULT_MAX_ACTIVE_TRAIL_CLONES
+		)
 	end
 end
 
@@ -1286,6 +1513,11 @@ local function createRuntimeState(options)
 		TrailSpacing = DEFAULT_TRAIL_SPACING,
 		TrailLifetime = DEFAULT_TRAIL_LIFETIME,
 		TrailBackOffset = DEFAULT_TRAIL_BACK_OFFSET,
+		VfxQuality = VFX_QUALITY_MEDIUM,
+		TrailEmitterRateScale = QUALITY_SETTINGS[VFX_QUALITY_MEDIUM].TrailEmitterRateScale,
+		HeadEmitterRateScale = QUALITY_SETTINGS[VFX_QUALITY_MEDIUM].HeadEmitterRateScale,
+		SpawnGroundTrailClones = QUALITY_SETTINGS[VFX_QUALITY_MEDIUM].SpawnGroundTrailClones,
+		MaxPooledTrailClones = QUALITY_SETTINGS[VFX_QUALITY_MEDIUM].MaxPooledTrailClones,
 		GroundTrailRaycastHeight = DEFAULT_GROUND_TRAIL_RAYCAST_HEIGHT,
 		GroundTrailRaycastDepth = DEFAULT_GROUND_TRAIL_RAYCAST_DEPTH,
 		GroundTrailLift = DEFAULT_GROUND_TRAIL_LIFT,
@@ -1301,6 +1533,8 @@ local function createRuntimeState(options)
 		Destroyed = false,
 		TrailSamplingStopped = false,
 		TrailLoopCounted = false,
+		ActiveTrailClones = 0,
+		MaxActiveTrailClones = DEFAULT_MAX_ACTIVE_TRAIL_CLONES,
 		SuppressAttachedBodyFlame = shouldSuppressAttachedBodyLayer(
 			attachedActiveBodyRoot,
 			trailTemplateSourceRoot

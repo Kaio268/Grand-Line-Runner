@@ -32,6 +32,7 @@ local SHIP_FINALIZE_WAIT_TIMEOUT_SECONDS = 10
 local RUNTIME_SPAWN_LOCATION_ATTRIBUTE = "ShipRuntimeSpawnLocation"
 local RUNTIME_SHELL_ATTRIBUTE = "GTRRuntimeShell"
 local CREW_VISUAL_GENERATION_ATTRIBUTE = "CrewVisualGeneration"
+local PLAYER_DATA_READY_ATTRIBUTE = "PlayerDataReady"
 local SHIP_FINALIZE_SUCCESS_RESULT = "finalized_real_ship_ok"
 
 local runtimeStateByPlayer = {}
@@ -253,6 +254,64 @@ local function getPendingShipRestore(player)
 	end
 
 	return pending
+end
+
+local function isPlayerDataReady(player)
+	return typeof(player) == "Instance"
+		and player:IsA("Player")
+		and player.Parent == Players
+		and player:GetAttribute(PLAYER_DATA_READY_ATTRIBUTE) == true
+end
+
+local function waitForDataManagerReady(player, deadline)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false
+	end
+
+	local timeout = math.max(0, deadline - os.clock())
+	if typeof(DataManager.WaitUntilReady) == "function" then
+		return DataManager:WaitUntilReady(player, timeout)
+	end
+
+	while player.Parent == Players and os.clock() < deadline do
+		if typeof(DataManager.IsReady) ~= "function" or DataManager:IsReady(player) then
+			return true
+		end
+		task.wait(0.1)
+	end
+
+	return player.Parent == Players
+		and (typeof(DataManager.IsReady) ~= "function" or DataManager:IsReady(player))
+end
+
+local function waitForPlayerDataReady(player, timeoutSeconds)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	if isPlayerDataReady(player) then
+		return true, "ready"
+	end
+
+	local timeout = math.max(0, tonumber(timeoutSeconds) or DATA_READY_TIMEOUT_SECONDS)
+	local deadline = os.clock() + timeout
+
+	if not waitForDataManagerReady(player, deadline) then
+		return false, "data_not_ready"
+	end
+
+	while player.Parent == Players and os.clock() < deadline do
+		if isPlayerDataReady(player) then
+			return true, "ready"
+		end
+		task.wait(0.1)
+	end
+
+	if isPlayerDataReady(player) then
+		return true, "ready"
+	end
+
+	return false, "player_data_not_ready"
 end
 
 local function removeShipFinalizeWaiter(state, generation, waiter)
@@ -1536,6 +1595,18 @@ local function getRebirthValueObject(player)
 end
 
 local function getUpgradeLevel(player)
+	if not isPlayerDataReady(player) then
+		local storedUpgrade = nil
+		if typeof(DataManager.TryGetValue) == "function" then
+			storedUpgrade = DataManager:TryGetValue(player, PLOT_UPGRADE_PATH)
+		else
+			storedUpgrade = DataManager:GetValue(player, PLOT_UPGRADE_PATH)
+		end
+		if storedUpgrade ~= nil then
+			return PlotUpgradeConfig.ClampLevel(storedUpgrade)
+		end
+	end
+
 	local valueObject = getUpgradeValueObject(player)
 	if valueObject then
 		return PlotUpgradeConfig.ClampLevel(valueObject.Value)
@@ -2253,6 +2324,24 @@ function ShipRuntimeService.WaitForShipFinalized(player, generation, timeoutSeco
 	return false, tostring(payload.Result or payload.Reason or "ship_finalize_failed"), payload
 end
 
+local function pendingRestoreMatchesExpected(pendingRestore, expectedShip)
+	if typeof(pendingRestore) ~= "table" or typeof(expectedShip) ~= "table" then
+		return false
+	end
+
+	local expectedLevel = tonumber(expectedShip.UpgradeLevel)
+	if expectedLevel ~= nil and tonumber(pendingRestore.ExpectedUpgradeLevel) ~= expectedLevel then
+		return false
+	end
+
+	local expectedModelName = tostring(expectedShip.ModelName or "")
+	if expectedModelName ~= "" and tostring(pendingRestore.ExpectedModelName or "") ~= expectedModelName then
+		return false
+	end
+
+	return true
+end
+
 function ShipRuntimeService.RefreshPlayerShip(player, options)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		diag("refresh_return player=<invalid> userId=<nil> ok=false reason=invalid_player details=nil")
@@ -2286,13 +2375,14 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		tostring(player.UserId),
 		tostring(DATA_READY_TIMEOUT_SECONDS)
 	)
-	if DataManager.WaitUntilReady and not DataManager:WaitUntilReady(player, DATA_READY_TIMEOUT_SECONDS) then
+	local dataReady, dataReadyReason = waitForPlayerDataReady(player, DATA_READY_TIMEOUT_SECONDS)
+	if not dataReady then
 		warnOnce(
 			"data_not_ready_" .. tostring(player.UserId),
 			"[ShipRuntimeService] Player data was not ready for %s; skipping active ship refresh.",
 			formatPlayer(player)
 		)
-		return makeLoggedRefreshFailure(player, "data_not_ready")
+		return makeLoggedRefreshFailure(player, dataReadyReason or "data_not_ready")
 	end
 	diag("refresh_data_ready player=%s userId=%s", player.Name, tostring(player.UserId))
 
@@ -2343,7 +2433,10 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 	local existingState = runtimeStateByPlayer[player]
 	local pendingRestore = existingState and existingState.pendingShipRestore
 	if typeof(pendingRestore) == "table" and typeof(pendingRestore.Clone) == "Instance" then
-		if not options.ForceReplace and pendingRestore.Generation == ShipRuntimeService.GetCrewVisualGeneration(player) then
+		if not options.ForceReplace
+			and pendingRestore.Generation == ShipRuntimeService.GetCrewVisualGeneration(player)
+			and pendingRestoreMatchesExpected(pendingRestore, expectedShip)
+		then
 			if options.TeleportAfterReplace == true then
 				pendingRestore.TeleportAfterReplace = true
 			end
@@ -2374,6 +2467,10 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		completeShipFinalizeWaiters(player, pendingRestore.Generation, "ship_finalize_cancelled", nil, {
 			Generation = pendingRestore.Generation,
 			Reason = "ship_finalize_cancelled",
+			ExpectedModelName = expectedShip.ModelName,
+			ExpectedUpgradeLevel = expectedShip.UpgradeLevel,
+			PendingExpectedModelName = pendingRestore.ExpectedModelName,
+			PendingExpectedUpgradeLevel = pendingRestore.ExpectedUpgradeLevel,
 		})
 		pendingRestore.Clone:Destroy()
 		existingState.pendingShipRestore = nil
@@ -2497,6 +2594,8 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 	state.positionIndex = positionIndex
 	state.pendingShipRestore = {
 		Clone = clone,
+		ExpectedModelName = visual.ModelName,
+		ExpectedUpgradeLevel = upgradeLevel,
 		Generation = generation,
 		Source = tostring(options.Reason or "ship_clone_restore"),
 		TeleportAfterReplace = teleportAfterReplace,
@@ -2864,6 +2963,23 @@ local function watchPlayerUpgrade(player)
 
 				ShipRuntimeService.RefreshPlayerShip(player)
 			end)
+
+			task.defer(function()
+				if player.Parent ~= Players then
+					return
+				end
+
+				if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
+					queueRefreshAfterReset(player, {
+						Reason = "plot_upgrade_watch_reconcile",
+					})
+					return
+				end
+
+				ShipRuntimeService.RefreshPlayerShip(player, {
+					Reason = "plot_upgrade_watch_reconcile",
+				})
+			end)
 		else
 			warnOnce(
 				"missing_upgrade_value_" .. tostring(player.UserId),
@@ -2893,6 +3009,50 @@ local function watchPlayerUpgrade(player)
 		end
 
 	end)
+end
+
+local function bindPlayerDataReadyRefresh(player)
+	local state = getRuntimeState(player)
+	local didPostReadyRefresh = false
+
+	local function refreshOnceDataReady()
+		if didPostReadyRefresh or player.Parent ~= Players then
+			return
+		end
+		if player:GetAttribute(PLAYER_DATA_READY_ATTRIBUTE) ~= true then
+			return
+		end
+
+		didPostReadyRefresh = true
+		task.defer(function()
+			if player.Parent ~= Players then
+				return
+			end
+
+			local options = {
+				ForceDataReady = true,
+				Reason = "player_data_ready",
+			}
+
+			if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
+				queueRefreshAfterReset(player, options)
+				return
+			end
+
+			local ok, reason, details = ShipRuntimeService.RefreshPlayerShip(player, options)
+			if ok then
+				return
+			end
+
+			warn(("[ShipRuntimeService] Post-data-ready ship refresh failed for %s: %s"):format(
+				formatPlayer(player),
+				tostring(reason or (details and details.Reason) or "unknown_error")
+			))
+		end)
+	end
+
+	state.connections[#state.connections + 1] = player:GetAttributeChangedSignal(PLAYER_DATA_READY_ATTRIBUTE):Connect(refreshOnceDataReady)
+	refreshOnceDataReady()
 end
 
 local function bindCharacterRespawn(player, character)
@@ -2960,6 +3120,7 @@ function ShipRuntimeService.Start()
 	Players.PlayerAdded:Connect(function(player)
 		diag("player_added player=%s userId=%s", player.Name, tostring(player.UserId))
 		attachCharacterSpawnHandler(player)
+		bindPlayerDataReadyRefresh(player)
 		watchPlayerUpgrade(player)
 		loadPlayerCharacterAtShipSpawn(player, "initial_join")
 	end)
@@ -2976,6 +3137,7 @@ function ShipRuntimeService.Start()
 	for _, player in ipairs(Players:GetPlayers()) do
 		diag("existing_player_start player=%s userId=%s", player.Name, tostring(player.UserId))
 		attachCharacterSpawnHandler(player)
+		bindPlayerDataReadyRefresh(player)
 		watchPlayerUpgrade(player)
 		loadPlayerCharacterAtShipSpawn(player, "initial_join")
 	end

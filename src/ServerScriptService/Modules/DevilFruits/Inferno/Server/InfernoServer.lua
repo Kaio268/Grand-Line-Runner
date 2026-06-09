@@ -34,6 +34,8 @@ local DEFAULT_FIRE_BURST_SPEED_RADIUS_MAX_SPEED = 300
 local REQUEST_VALIDATION_DISTANCE_EPSILON = 0.05
 local REQUEST_VALIDATION_DIRECTION_DELTA_DEGREES = 1
 local MIN_REMAINING_DASH_DISTANCE = 0.1
+local FLAME_DASH_VFX_REPLICATION_RADIUS = 700
+local FLAME_DASH_VFX_CLIENT_MAX_DISTANCE = 700
 local activeFireBurstMovementLocksByPlayer = {}
 local hitEffectService = nil
 local function getSharedTimestamp()
@@ -359,6 +361,10 @@ local function buildStartPayload(
 		StartedAt = dashStartAt,
 		ClientCastId = clientCastId,
 		ServerProcessingTimeMs = math.max(0, (dashStartAt - requestReceivedAt) * 1000),
+		OriginPosition = startPosition,
+		RootPosition = startPosition,
+		ReplicationRadius = FLAME_DASH_VFX_REPLICATION_RADIUS,
+		ClientMaxDistance = FLAME_DASH_VFX_CLIENT_MAX_DISTANCE,
 		StartPosition = startPosition,
 		EndPosition = startPosition + (plan.Direction * plan.Distance),
 	}
@@ -380,6 +386,10 @@ local function emitResolvePayload(context, plan, resolveState, completionToleran
 		Interrupted = resolveState.Interrupted,
 		EndedEarly = resolveState.TraveledDistance + math.max(completionTolerance or 0.5, 0.5) < plan.Distance,
 		WallShortened = plan.WallShortened,
+		OriginPosition = resolveState.StartPosition,
+		RootPosition = resolveState.EndPosition,
+		ReplicationRadius = FLAME_DASH_VFX_REPLICATION_RADIUS,
+		ClientMaxDistance = FLAME_DASH_VFX_CLIENT_MAX_DISTANCE,
 		StartPosition = resolveState.StartPosition,
 		ActualEndPosition = resolveState.EndPosition,
 		EndPosition = resolveState.StartPosition + (plan.Direction * plan.Distance),

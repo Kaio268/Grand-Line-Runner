@@ -1214,6 +1214,10 @@ local SHARED_WAVE_VISUAL_SNAP_DISTANCE = 90
 local SHARED_WAVE_VISUAL_REBUILD_DELAY = 0.05
 local SHARED_WAVE_VISUAL_MISSING_HITBOX_WARN_DELAY = 1
 local SHARED_WAVE_DIAGNOSTICS_INTERVAL = 2
+local SHARED_WAVE_NEAR_SMOOTH_DISTANCE = 520
+local SHARED_WAVE_FAR_SMOOTH_DISTANCE = 950
+local SHARED_WAVE_FAR_UPDATE_INTERVAL = 0.12
+local SHARED_WAVE_DISTANT_UPDATE_INTERVAL = 0.35
 local WAVE_SOUND_VOLUME = 0.7
 local WAVE_SOUND_ROLLOFF_MIN_DISTANCE = 45
 local WAVE_SOUND_ROLLOFF_MAX_DISTANCE = 450
@@ -1227,6 +1231,8 @@ local waveClientDiagnostics = {
 	UpdateTimeSum = 0,
 	UpdateTimeSamples = 0,
 	LastPublishedAt = 0,
+	LastUpdatedSmoothers = 0,
+	LastSkippedSmoothers = 0,
 }
 
 local function isWaveVisualRoot(instance)
@@ -1421,6 +1427,8 @@ local function publishClientWaveDiagnostics()
 	folder:SetAttribute("WaveClientVisualPartCount", visualPartCount)
 	folder:SetAttribute("WaveClientUpdateTimeMs", waveClientDiagnostics.LastUpdateTimeMs)
 	folder:SetAttribute("WaveClientCleanupCount", waveClientDiagnostics.CleanupCount)
+	folder:SetAttribute("WaveClientUpdatedSmootherCount", waveClientDiagnostics.LastUpdatedSmoothers)
+	folder:SetAttribute("WaveClientSkippedSmootherCount", waveClientDiagnostics.LastSkippedSmoothers)
 end
 
 local function recordClientWaveUpdateTime(elapsedSeconds)
@@ -2013,11 +2021,84 @@ local function createSharedHazardVisualSmoother(hazard)
 	return controller
 end
 
+local function getSharedWaveFocusPosition()
+	local character = LocalPlayer.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		return rootPart.Position
+	end
+
+	local camera = Workspace.CurrentCamera
+	return camera and camera.CFrame.Position or nil
+end
+
+local function getSmootherPosition(controller)
+	if not controller then
+		return nil
+	end
+	if controller.CurrentCFrame then
+		return controller.CurrentCFrame.Position
+	end
+	local hazard = controller.Hazard
+	if hazard and hazard.Parent then
+		local ok, pivot = pcall(getPivot, hazard)
+		if ok and typeof(pivot) == "CFrame" then
+			return pivot.Position
+		end
+	end
+	return nil
+end
+
+local function shouldUpdateSmootherThisFrame(controller, deltaTime, focusPosition)
+	if not focusPosition then
+		return true, deltaTime
+	end
+
+	local position = getSmootherPosition(controller)
+	if not position then
+		return true, deltaTime
+	end
+
+	local distance = (position - focusPosition).Magnitude
+	if distance <= SHARED_WAVE_NEAR_SMOOTH_DISTANCE then
+		controller.LodAccumulatedDelta = 0
+		return true, deltaTime
+	end
+
+	local interval = if distance <= SHARED_WAVE_FAR_SMOOTH_DISTANCE
+		then SHARED_WAVE_FAR_UPDATE_INTERVAL
+		else SHARED_WAVE_DISTANT_UPDATE_INTERVAL
+	controller.LodAccumulatedDelta = (tonumber(controller.LodAccumulatedDelta) or 0) + deltaTime
+	if controller.LodAccumulatedDelta < interval then
+		return false, 0
+	end
+
+	local accumulatedDelta = controller.LodAccumulatedDelta
+	controller.LodAccumulatedDelta = 0
+	return true, accumulatedDelta
+end
+
 local function updateSharedHazardVisualSmoothers(deltaTime)
 	local updateStartedAt = os.clock()
+	local focusPosition = getSharedWaveFocusPosition()
+	local updated = 0
+	local skipped = 0
 	for _, controller in pairs(sharedHazardVisualSmoothers) do
-		controller:Update(deltaTime)
+		if controller.Destroyed ~= true and controller.Hazard and not controller.Hazard.Parent then
+			controller:Update(deltaTime)
+			updated += 1
+		else
+			local shouldUpdate, updateDelta = shouldUpdateSmootherThisFrame(controller, deltaTime, focusPosition)
+			if shouldUpdate then
+				controller:Update(updateDelta)
+				updated += 1
+			else
+				skipped += 1
+			end
+		end
 	end
+	waveClientDiagnostics.LastUpdatedSmoothers = updated
+	waveClientDiagnostics.LastSkippedSmoothers = skipped
 	recordClientWaveUpdateTime(os.clock() - updateStartedAt)
 end
 

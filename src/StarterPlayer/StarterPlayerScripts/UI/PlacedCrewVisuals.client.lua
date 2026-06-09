@@ -18,11 +18,15 @@ local ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVi
 local ATTR = PlacedCrewState.Attribute
 local OVERHEAD_ATTR = CrewOverhead.Attribute
 local CLIENT_VISUAL_ATTRIBUTE = "ClientPlacedCrewVisual"
-local UPDATE_INTERVAL_SECONDS = 0.75
-local FULL_DISTANCE = 225
-local REDUCED_DISTANCE = 475
-local MAX_FULL_VISUALS = 80
-local MAX_REDUCED_VISUALS = 150
+local UPDATE_INTERVAL_SECONDS = 1
+local FULL_DISTANCE = 180
+local REDUCED_DISTANCE = 350
+local MAX_FULL_VISUALS = 36
+local MAX_REDUCED_VISUALS = 96
+local FOCUS_REFRESH_DISTANCE = 18
+local MAINTENANCE_REFRESH_INTERVAL_SECONDS = 3
+local MONEY_LABEL_NEAR_DISTANCE = 240
+local MONEY_LABEL_REFRESH_INTERVAL_SECONDS = 1.5
 local REFRESH_BUDGET_SECONDS = 0.004
 local REFRESH_MAX_STANDS_PER_FRAME = 6
 local BUBBLE_NAME = "ClientPremiumCrewStealProtectionBubble"
@@ -324,8 +328,51 @@ local function resolveMode(record, focusPosition)
 	return "hidden"
 end
 
-local function updateMoneyLabel(standModel)
+local function shouldRefreshMoneyLabel(record, standModel, mode, focusPosition)
+	if mode == "hidden" then
+		return false
+	end
+
+	local ownerUserId = tonumber(standModel:GetAttribute(ATTR.OwnerUserId)) or 0
+	if ownerUserId == localPlayer.UserId then
+		return true
+	end
+
+	local handle = findHandle(standModel)
+	if not handle then
+		return false
+	end
+
+	if (handle.Position - focusPosition).Magnitude > MONEY_LABEL_NEAR_DISTANCE then
+		return false
+	end
+
+	local now = os.clock()
+	local lastRefresh = tonumber(record.LastMoneyRefreshAt) or 0
+	if now - lastRefresh >= MONEY_LABEL_REFRESH_INTERVAL_SECONDS then
+		record.LastMoneyRefreshAt = now
+		return true
+	end
+
+	local amountKey = table.concat({
+		tostring(standModel:GetAttribute(ATTR.ClaimReadyAmount) or ""),
+		tostring(standModel:GetAttribute(ATTR.ClaimIncomePerSecond) or ""),
+		tostring(standModel:GetAttribute(ATTR.IncomeUpdatedAtUnix) or ""),
+	}, "|")
+	if amountKey ~= record.LastMoneyAmountKey then
+		record.LastMoneyAmountKey = amountKey
+		record.LastMoneyRefreshAt = now
+		return true
+	end
+
+	return false
+end
+
+local function updateMoneyLabel(record, standModel, mode, focusPosition)
 	if not standModel or standModel:GetAttribute(ATTR.Active) ~= true then
+		return
+	end
+	if not shouldRefreshMoneyLabel(record, standModel, mode, focusPosition) then
 		return
 	end
 
@@ -409,7 +456,7 @@ processRefreshQueue = function()
 		else
 			local mode = resolveMode(record, focusPosition)
 			ensureVisual(record, mode)
-			updateMoneyLabel(standModel)
+			updateMoneyLabel(record, standModel, mode, focusPosition)
 		end
 	end
 
@@ -470,6 +517,8 @@ local function trackStand(standModel)
 		Connections = {},
 		Clone = nil,
 		Mode = nil,
+		LastMoneyAmountKey = nil,
+		LastMoneyRefreshAt = 0,
 	}
 	tracked[standModel] = record
 
@@ -506,9 +555,18 @@ local addedConnection = CollectionService:GetInstanceAddedSignal(PlacedCrewState
 local removedConnection = CollectionService:GetInstanceRemovedSignal(PlacedCrewState.Tag):Connect(untrackStand)
 
 task.spawn(function()
+	local lastFocusPosition = getFocusPosition()
+	local lastMaintenanceRefreshAt = 0
 	while true do
 		task.wait(UPDATE_INTERVAL_SECONDS)
-		requestRefresh()
+		local focusPosition = getFocusPosition()
+		local moved = (focusPosition - lastFocusPosition).Magnitude >= FOCUS_REFRESH_DISTANCE
+		local maintenanceDue = os.clock() - lastMaintenanceRefreshAt >= MAINTENANCE_REFRESH_INTERVAL_SECONDS
+		if moved or maintenanceDue then
+			lastFocusPosition = focusPosition
+			lastMaintenanceRefreshAt = os.clock()
+			requestRefresh()
+		end
 	end
 end)
 
