@@ -13,6 +13,7 @@ local NONE_EQUIPPED = ""
 local DATA_MANAGER_UNAVAILABLE_REASON = "data_manager_unavailable"
 
 local AdminConfig = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AdminConfig"))
+local BountyRankService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("BountyRankService"))
 local ServerRestartService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ServerRestartService"))
 local TitlesConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Titles"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
@@ -564,10 +565,31 @@ local function ensurePersistentTitle(titleId)
 	return titleDefinition, nil
 end
 
+local function isBountyRankTitle(titleDefinition)
+	return titleDefinition
+		and titleDefinition.UnlockType == "DynamicRank"
+		and titleDefinition.RankAttribute == "LB_Bounty"
+end
+
 local function isDynamicTitleUnlocked(player, titleDefinition, allowPending)
 	local rankAttribute = titleDefinition and titleDefinition.RankAttribute
 	if typeof(rankAttribute) ~= "string" or rankAttribute == "" then
 		return false, "missing_rank_attribute"
+	end
+
+	if isBountyRankTitle(titleDefinition) then
+		BountyRankService.Start()
+
+		local eligible, reason, status = BountyRankService.IsPirateEmperorEligible(player)
+		if eligible then
+			return true, "dynamic_unlocked"
+		end
+
+		if allowPending == true and status and status.Status == "Loading" and status.Ready ~= true then
+			return true, "dynamic_pending"
+		end
+
+		return false, reason or "bounty_rank_unavailable"
 	end
 
 	local requiredRank = math.max(1, math.floor(tonumber(titleDefinition.RequiredRank) or 1))
@@ -742,6 +764,9 @@ local function hookValidationSignals(player)
 		if typeof(rankAttribute) == "string" and rankAttribute ~= "" then
 			connectAttribute(rankAttribute)
 			connectAttribute(rankAttribute .. "_Ready")
+			connectAttribute(rankAttribute .. "_Status")
+			connectAttribute(rankAttribute .. "_LastRefreshAt")
+			connectAttribute(rankAttribute .. "_ErrorMessage")
 		end
 	end
 
@@ -822,6 +847,7 @@ function TitleService.Start()
 
 	started = true
 	bindTesterRoleChanges()
+	BountyRankService.Start()
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		hydrateRuntimeTitles(player)

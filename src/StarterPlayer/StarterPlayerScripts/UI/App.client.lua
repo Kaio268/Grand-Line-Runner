@@ -2211,17 +2211,10 @@ local function readDynamicTitleStatus(titleDefinition, trackedValue)
 	local requiredRank = math.max(1, math.floor(tonumber(titleDefinition.RequiredRank) or 1))
 	local currentRank = tonumber(player:GetAttribute(rankAttribute))
 	local visibleLimit = math.max(1, math.floor(tonumber(player:GetAttribute(rankAttribute .. "_VisibleLimit")) or 100))
-	local visibleCount = math.max(0, math.floor(tonumber(player:GetAttribute(rankAttribute .. "_VisibleCount")) or 0))
 	local boardReady = player:GetAttribute(rankAttribute .. "_Ready") == true
-
-	if currentRank ~= nil and currentRank >= 1 then
-		return {
-			unlocked = currentRank <= requiredRank,
-			currentRank = currentRank,
-			rankLabel = "#" .. tostring(math.floor(currentRank + 0.5)),
-			statusKey = "Ranked",
-			visibleLimit = visibleLimit,
-		}
+	local boardStatus = tostring(player:GetAttribute(rankAttribute .. "_Status") or "")
+	if boardStatus == "" then
+		boardStatus = if boardReady then "Ready" else "Loading"
 	end
 
 	if math.max(0, tonumber(trackedValue) or 0) <= 0 then
@@ -2234,17 +2227,48 @@ local function readDynamicTitleStatus(titleDefinition, trackedValue)
 		}
 	end
 
-	if boardReady then
-		if visibleCount < visibleLimit then
-			return {
-				unlocked = false,
-				currentRank = nil,
-				rankLabel = "Board Updating...",
-				statusKey = "PendingBoard",
-				visibleLimit = visibleLimit,
-			}
-		end
+	if boardStatus == "Error" and not boardReady then
+		return {
+			unlocked = false,
+			currentRank = nil,
+			rankLabel = "Board Unavailable",
+			statusKey = "BoardError",
+			visibleLimit = visibleLimit,
+		}
+	end
 
+	if boardStatus == "Loading" and not boardReady then
+		return {
+			unlocked = false,
+			currentRank = nil,
+			rankLabel = "Checking Board...",
+			statusKey = "PendingBoard",
+			visibleLimit = visibleLimit,
+		}
+	end
+
+	if currentRank ~= nil and currentRank >= 1 then
+		local stale = boardStatus == "Stale"
+		return {
+			unlocked = currentRank <= requiredRank,
+			currentRank = if stale then nil else currentRank,
+			rankLabel = if stale then "Board Stale" else "#" .. tostring(math.floor(currentRank + 0.5)),
+			statusKey = if stale then "BoardStale" else "Ranked",
+			visibleLimit = visibleLimit,
+		}
+	end
+
+	if boardStatus == "Stale" then
+		return {
+			unlocked = false,
+			currentRank = nil,
+			rankLabel = "Board Stale",
+			statusKey = "BoardStale",
+			visibleLimit = visibleLimit,
+		}
+	end
+
+	if boardReady then
 		return {
 			unlocked = false,
 			currentRank = nil,
@@ -3986,6 +4010,21 @@ local function bindTitleTracking()
 			)
 			trackConnection(
 				player:GetAttributeChangedSignal(rankAttribute .. "_VisibleCount"),
+				scheduleRender,
+				titleAttributeConnections
+			)
+			trackConnection(
+				player:GetAttributeChangedSignal(rankAttribute .. "_Status"),
+				scheduleRender,
+				titleAttributeConnections
+			)
+			trackConnection(
+				player:GetAttributeChangedSignal(rankAttribute .. "_LastRefreshAt"),
+				scheduleRender,
+				titleAttributeConnections
+			)
+			trackConnection(
+				player:GetAttributeChangedSignal(rankAttribute .. "_ErrorMessage"),
 				scheduleRender,
 				titleAttributeConnections
 			)

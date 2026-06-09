@@ -138,6 +138,8 @@ local Boards = {
 		display = function(v) return Suffix(v) end,
 	},
 	{
+		-- Legacy display only. Authoritative bounty ranks, LB_Bounty attributes,
+		-- and Pirate Emperor eligibility are owned by BountyRankService/v2.
 		name = "Bounty",
 		stat = "Bounty",
 		ds = DataStoreService:GetOrderedDataStore("GrandLineRush_BountyLeaderboard_v1"),
@@ -145,8 +147,18 @@ local Boards = {
 		display = function(v) return Suffix(v) end,
 		headerText = "Bounty",
 		legacyLabels = { "Time Played", "TimePlayed", "Total Time Played" },
+		writeEnabled = false,
+		rankAttributes = false,
 	},
 }
+
+local function boardWritesStats(board)
+	return board and board.writeEnabled ~= false
+end
+
+local function boardPublishesRankAttributes(board)
+	return board and board.rankAttributes ~= false
+end
 
 
 local function firstDescByName(root, name)
@@ -275,6 +287,10 @@ local pendingBoardRefreshes = {}
 local fillBoard
 
 local function updateChatTagsForBoard(board, page)
+	if not boardPublishesRankAttributes(board) then
+		return
+	end
+
 	local included = {}
 	for rank, entry in ipairs(page) do
 		if entry and entry.key then
@@ -464,6 +480,10 @@ local function drainQueue()
 end
 
 local function queueSave(board, plr, value)
+	if not boardWritesStats(board) then
+		return
+	end
+
 	local encoded = Round(Encode((value or 0) + 1))
 	local key = plr.Name
 	if not debouncers[board.name] then
@@ -486,6 +506,10 @@ local function queueSave(board, plr, value)
 end
 
 local function pushOne(board, plr)
+	if not boardWritesStats(board) then
+		return
+	end
+
 	local val = select(1, getNumericStat(plr, board.stat))
 	if val == nil then
 		return
@@ -563,7 +587,9 @@ local function pushAllStores()
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.UserId and plr.UserId >= 0 then
 			for _, b in ipairs(Boards) do
-				pushOne(b, plr)
+				if boardWritesStats(b) then
+					pushOne(b, plr)
+				end
 			end
 		end
 	end
@@ -579,6 +605,10 @@ local function initRankAttributes(plr)
 	end
 
 	for _, board in ipairs(Boards) do
+		if not boardPublishesRankAttributes(board) then
+			continue
+		end
+
 		plr:SetAttribute("LB_" .. board.name, nil)
 		plr:SetAttribute("LB_" .. board.name .. "_Ready", boardSnapshotReady[board.name] == true)
 		plr:SetAttribute("LB_" .. board.name .. "_VisibleLimit", board.pageSize or PAGE_SIZE)
@@ -632,6 +662,10 @@ end
 
 local function bindStatChanges(plr)
 	for _, board in ipairs(Boards) do
+		if not boardWritesStats(board) then
+			continue
+		end
+
 		local b = board
 		plr:GetAttributeChangedSignal(b.stat):Connect(function()
 			local a = plr:GetAttribute(b.stat)
@@ -642,6 +676,10 @@ local function bindStatChanges(plr)
 	end
 	local function attachToRoots()
 		for _, board in ipairs(Boards) do
+			if not boardWritesStats(board) then
+				continue
+			end
+
 			local b = board
 			hookFolderForStat(plr:FindFirstChild("TotalStats"), b, plr)
 			hookFolderForStat(plr:FindFirstChild("Stats"), b, plr)
@@ -652,12 +690,18 @@ local function bindStatChanges(plr)
 	plr.ChildAdded:Connect(function(child)
 		if child.Name == "TotalStats" or child.Name == "Stats" or child.Name == "leaderstats" then
 			for _, board in ipairs(Boards) do
-				hookFolderForStat(child, board, plr)
+				if boardWritesStats(board) then
+					hookFolderForStat(child, board, plr)
+				end
 			end
 		end
 	end)
 	plr.DescendantAdded:Connect(function(inst)
 		for _, board in ipairs(Boards) do
+			if not boardWritesStats(board) then
+				continue
+			end
+
 			if inst.Name == board.stat and isNumericValueObject(inst) then
 				inst.Changed:Connect(function()
 					local v = select(1, getNumericStat(plr, board.stat))
@@ -680,6 +724,10 @@ Players.PlayerAdded:Connect(function(plr)
 	
 	task.defer(function()
 		for _, board in ipairs(Boards) do
+			if not boardPublishesRankAttributes(board) then
+				continue
+			end
+
 			local included = lastRanks[board.name]
 			plr:SetAttribute("LB_" .. board.name .. "_Ready", boardSnapshotReady[board.name] == true)
 			plr:SetAttribute("LB_" .. board.name .. "_VisibleLimit", board.pageSize or PAGE_SIZE)
