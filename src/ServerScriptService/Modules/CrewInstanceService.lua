@@ -165,10 +165,16 @@ local function isProtectedTutorialReward(player, instanceData)
 	return typeof(instanceData) == "table" and instanceData.TutorialReward == true and isTutorialIncomplete(player)
 end
 
-local function notifyInventorySaved(player, crewInventory)
-	CrewInventoryDerivedCache.MarkSaved(player, crewInventory, "inventory_saved")
+local function notifyInventorySaved(player, crewInventory, metadata)
+	metadata = if typeof(metadata) == "table" then metadata else {}
+	local counters = metadata.Counters
+	if typeof(counters) == "table" then
+		counters.InventoryNotifyCount = (tonumber(counters.InventoryNotifyCount) or 0) + 1
+	end
+
+	CrewInventoryDerivedCache.MarkSaved(player, crewInventory, tostring(metadata.Reason or "inventory_saved"))
 	for callback in pairs(inventorySavedCallbacks) do
-		local ok, err = pcall(callback, player, crewInventory)
+		local ok, err = pcall(callback, player, crewInventory, metadata)
 		if not ok then
 			warn(string.format("[CrewInstanceService] Inventory save callback failed: %s", tostring(err)))
 		end
@@ -269,7 +275,7 @@ local function buildMetadata(storageName, entry)
 		LegacyStorageName = legacyStorageName,
 		BaseName = baseName,
 		Variant = variantKey,
-		Rarity = tostring(info.Rarity or entry.Rarity or "Common"),
+		Rarity = tostring(entry.Rarity or info.Rarity or "Common"),
 		Income = tonumber(info.Income or entry.Income) or 0,
 		Render = render,
 		GoldenRender = goldenRender,
@@ -407,7 +413,7 @@ local function normalizeInstanceData(instanceId, instanceData, fallbackStorageNa
 		return nil
 	end
 
-	local rarity = CrewIncomeBalance.NormalizeRarity(metadata.Rarity or instanceData.Rarity)
+	local rarity = CrewIncomeBalance.NormalizeRarity(instanceData.Rarity or metadata.Rarity)
 	local variant = CrewIncomeBalance.NormalizeVariant(metadata.Variant or instanceData.Variant)
 	local baseIncomeRoll, income, incomeRollVersion = buildIncomeRollFields(rarity, variant, instanceData)
 	local normalized = {
@@ -932,7 +938,8 @@ local function saveCrewInventoryAndMirrors(player, crewInventory, options)
 	return true, nil, status
 end
 
-local function saveCrewMemberInventory(player, crewMemberInventory, _options)
+local function saveCrewMemberInventory(player, crewMemberInventory, options)
+	options = if typeof(options) == "table" then options else {}
 	local canonicalInventory = normalizeInventoryData(cloneValue(crewMemberInventory), {
 		Canonical = true,
 	})
@@ -940,7 +947,7 @@ local function saveCrewMemberInventory(player, crewMemberInventory, _options)
 	if ok ~= true then
 		return false, "inventory_write_failed:CrewMemberInventory:" .. tostring(reason or "")
 	end
-	notifyInventorySaved(player, canonicalInventory)
+	notifyInventorySaved(player, canonicalInventory, options.InventorySavedMetadata)
 	return true, nil
 end
 
@@ -1128,15 +1135,17 @@ local function createInstanceInternal(player, crewMemberInventory, storageName, 
 	else
 		table.insert(crewMemberInventory.Order, instanceId)
 	end
-	IndexCollectionService.MarkCrewMemberDiscovered(
-		player,
-		metadata.CrewMemberId,
-		overrides and overrides.BaseName or metadata.BaseName,
-		overrides and overrides.Variant or metadata.Variant,
-		{
-			DeferShadowRefresh = overrides and overrides.DeferIndexShadowRefresh == true,
-		}
-	)
+	if not (overrides and overrides.DeferIndexDiscovery == true) then
+		IndexCollectionService.MarkCrewMemberDiscovered(
+			player,
+			metadata.CrewMemberId,
+			overrides and overrides.BaseName or metadata.BaseName,
+			overrides and overrides.Variant or metadata.Variant,
+			{
+				DeferShadowRefresh = overrides and overrides.DeferIndexShadowRefresh == true,
+			}
+		)
+	end
 
 	return instanceId, crewMemberInventory.ById[instanceId]
 end
@@ -2718,6 +2727,567 @@ function Module.SwapStandInstance(player, standName, incomingInstanceRef, option
 		finalInventory.ById[tostring(outgoingInstanceId)],
 		nil,
 		debugInfo
+end
+
+local function removeInstanceFromInventory(crewMemberInventory, instanceId)
+	instanceId = tostring(instanceId or "")
+	if instanceId == "" or typeof(crewMemberInventory) ~= "table" then
+		return
+	end
+
+	if typeof(crewMemberInventory.ById) == "table" then
+		crewMemberInventory.ById[instanceId] = nil
+	end
+	if typeof(crewMemberInventory.Order) == "table" then
+		for index = #crewMemberInventory.Order, 1, -1 do
+			if tostring(crewMemberInventory.Order[index]) == instanceId then
+				table.remove(crewMemberInventory.Order, index)
+				break
+			end
+		end
+	end
+end
+
+local function incrementCounter(counters, key, amount)
+	if typeof(counters) ~= "table" then
+		return
+	end
+	counters[key] = (tonumber(counters[key]) or 0) + (tonumber(amount) or 1)
+end
+
+local function countStoredInstancesWithAssignments(crewMemberInventory, assignments)
+	if typeof(crewMemberInventory) ~= "table" or typeof(crewMemberInventory.ById) ~= "table" then
+		return 0
+	end
+
+	local assignedSet = {}
+	for _, instanceId in pairs(if typeof(assignments) == "table" then assignments else {}) do
+		local normalized = tostring(instanceId or "")
+		if normalized ~= "" then
+			assignedSet[normalized] = true
+		end
+	end
+
+	local count = 0
+	for rawInstanceId, instanceData in pairs(crewMemberInventory.ById) do
+		local instanceId = tostring(instanceData and instanceData.InstanceId or rawInstanceId or "")
+		if
+			instanceId ~= ""
+			and typeof(instanceData) == "table"
+			and tostring(instanceData.AssignedStand or "") == ""
+			and instanceData.Overflow ~= true
+			and assignedSet[instanceId] ~= true
+		then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function buildIndexDiscoveryOperation(player, instanceData, seenPaths)
+	if typeof(instanceData) ~= "table" then
+		return nil
+	end
+
+	local itemId = IndexCollectionService.ResolveCrewMemberItemId(
+		getInstanceCrewKey(instanceData),
+		tostring(instanceData.BaseName or ""),
+		tostring(instanceData.Variant or "Normal")
+	)
+	if not itemId then
+		return nil
+	end
+
+	local path = "IndexCollection.CrewMembers." .. tostring(itemId)
+	if seenPaths[path] == true then
+		return nil
+	end
+	seenPaths[path] = true
+
+	local currentValue = getDataManager():TryGetValue(player, path)
+	if currentValue == true then
+		return nil
+	end
+
+	return {
+		Kind = "Set",
+		Path = path,
+		Value = true,
+	}
+end
+
+local ADMIN_FILL_SHIP_INVENTORY_READ_TIMEOUT_SECONDS = 3
+local ADMIN_FILL_SHIP_INVENTORY_READ_RETRY_SECONDS = 0.1
+
+local function getAdminFillShipBulkPlayerLabel(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return "unknown(0)"
+	end
+	return string.format("%s(%d)", player.Name, player.UserId)
+end
+
+local function isAdminFillShipBulkCancelled(cancelToken)
+	return typeof(cancelToken) == "table" and cancelToken.Cancelled == true
+end
+
+local function readAdminFillShipBulkInventory(player, timeoutSeconds)
+	local dataManager = getDataManager()
+	local startedAt = os.clock()
+	local timeout = math.max(0.1, tonumber(timeoutSeconds) or ADMIN_FILL_SHIP_INVENTORY_READ_TIMEOUT_SECONDS)
+	local deadline = startedAt + timeout
+	local lastReason = nil
+
+	while os.clock() <= deadline do
+		if typeof(dataManager.TryGetValue) == "function" then
+			local value, reason = dataManager:TryGetValue(player, CANONICAL_INVENTORY_PATH)
+			if typeof(value) == "table" then
+				return value, nil, os.clock() - startedAt
+			end
+			lastReason = tostring(reason or "inventory_missing")
+		elseif typeof(dataManager.IsReady) ~= "function" then
+			lastReason = "try_get_value_unavailable"
+		elseif dataManager:IsReady(player) ~= true then
+			lastReason = "data_manager_not_ready"
+		else
+			local ok, valueOrErr = pcall(function()
+				return dataManager:GetValue(player, CANONICAL_INVENTORY_PATH)
+			end)
+			if ok and typeof(valueOrErr) == "table" then
+				return valueOrErr, nil, os.clock() - startedAt
+			end
+			lastReason = if ok then "inventory_missing" else tostring(valueOrErr)
+		end
+
+		local remaining = deadline - os.clock()
+		if remaining <= 0 then
+			break
+		end
+		task.wait(math.min(ADMIN_FILL_SHIP_INVENTORY_READ_RETRY_SECONDS, remaining))
+	end
+
+	return nil, tostring(lastReason or "inventory_read_timeout"), os.clock() - startedAt
+end
+
+function Module.ApplyAdminFillShipBulk(player, requests, options)
+	options = if typeof(options) == "table" then options else {}
+	requests = if typeof(requests) == "table" then requests else {}
+	local counters = if typeof(options.Counters) == "table" then options.Counters else {}
+	local sourcePath = tostring(options.SourcePath or "admin_fill_ship_bulk")
+	local cancelToken = if typeof(options.CancelToken) == "table" then options.CancelToken else nil
+
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return {
+			Success = false,
+			Changed = false,
+			Reason = "invalid_player",
+			Counters = counters,
+		}
+	end
+	if #requests <= 0 then
+		return {
+			Success = true,
+			Changed = false,
+			Reason = "no_requests",
+			Counters = counters,
+			Created = {},
+			Failures = {},
+			Skipped = {},
+		}
+	end
+
+	if isAdminFillShipBulkCancelled(cancelToken) then
+		return {
+			Success = false,
+			Changed = false,
+			Reason = "cancelled",
+			Counters = counters,
+			Created = {},
+			Failures = { "cancelled:before_inventory_read" },
+			Skipped = {},
+		}
+	end
+
+	local ready, readyReason = ensureInventoryAuthorityReady(player, sourcePath)
+	if ready ~= true then
+		return {
+			Success = false,
+			Changed = false,
+			Reason = tostring(readyReason or "inventory_authority_not_ready"),
+			Counters = counters,
+		}
+	end
+
+	local rawInventory, readReason, readDuration =
+		readAdminFillShipBulkInventory(player, options.InventoryReadTimeoutSeconds)
+	local readDurationMs = math.floor((tonumber(readDuration) or 0) * 1000 + 0.5)
+	if typeof(rawInventory) ~= "table" then
+		warn(string.format(
+			"[AdminFillShip] inventory_read_failed target=%s source=%s reason=%s durationMs=%d timeoutSeconds=%s",
+			getAdminFillShipBulkPlayerLabel(player),
+			sourcePath,
+			tostring(readReason or "unknown"),
+			readDurationMs,
+			tostring(options.InventoryReadTimeoutSeconds or ADMIN_FILL_SHIP_INVENTORY_READ_TIMEOUT_SECONDS)
+		))
+		return {
+			Success = false,
+			Changed = false,
+			Reason = "inventory_read_failed:" .. tostring(readReason or "unknown"),
+			Counters = counters,
+			Created = {},
+			Failures = { "inventory_read:" .. tostring(readReason or "unknown") },
+			Skipped = {},
+		}
+	end
+	print(string.format(
+		"[AdminFillShip] inventory_read_ok target=%s source=%s durationMs=%d",
+		getAdminFillShipBulkPlayerLabel(player),
+		sourcePath,
+		readDurationMs
+	))
+
+	local finalInventory = normalizeInventoryData(cloneValue(rawInventory), {
+		Canonical = true,
+	})
+	local createdRecords = {}
+	local standRows = {}
+	local failures = {}
+	local skipped = {}
+	local filled = 0
+	local replaced = 0
+	local now = os.time()
+	local quickAssignments = if typeof(CrewQuickSlotService.GetAssignments) == "function"
+		then CrewQuickSlotService.GetAssignments(player)
+		else {}
+	local quickUnlockedSlots = if typeof(CrewQuickSlotService.GetUnlockedSlots) == "function"
+		then CrewQuickSlotService.GetUnlockedSlots(player)
+		else 0
+	local quickAssignmentsChanged = false
+
+	local function clearQuickAssignment(instanceId)
+		instanceId = tostring(instanceId or "")
+		if instanceId == "" then
+			return
+		end
+		for slotKey, assignedInstanceId in pairs(quickAssignments) do
+			if tostring(assignedInstanceId or "") == instanceId then
+				quickAssignments[slotKey] = nil
+				quickAssignmentsChanged = true
+			end
+		end
+	end
+
+	local function assignReleasedToQuickSlot(instanceId)
+		instanceId = tostring(instanceId or "")
+		if instanceId == "" then
+			return false
+		end
+
+		clearQuickAssignment(instanceId)
+		for index = 1, quickUnlockedSlots do
+			local slotKey = tostring(index)
+			if tostring(quickAssignments[slotKey] or "") == "" then
+				quickAssignments[slotKey] = instanceId
+				quickAssignmentsChanged = true
+				return true
+			end
+		end
+		return false
+	end
+
+	for _, request in ipairs(requests) do
+		if typeof(request) ~= "table" then
+			failures[#failures + 1] = "invalid_request"
+			continue
+		end
+
+		local slotName = tostring(request.SlotName or request.StandName or "")
+		if slotName == "" then
+			failures[#failures + 1] = "?:invalid_stand"
+			continue
+		end
+		if slotName == CAPTAIN_SLOT_KEY then
+			failures[#failures + 1] = slotName .. ":captain_slot_not_numeric_stand"
+			continue
+		end
+
+		local fillMode = tostring(request.FillMode or options.FillMode or "EmptyOnly")
+		local occupied = getStandOccupancy(player, slotName, finalInventory)
+		if fillMode ~= "ReplaceAll" and occupied then
+			skipped[#skipped + 1] = slotName .. ":occupied"
+			continue
+		end
+
+		local descriptor = if typeof(request.Descriptor) == "table" then request.Descriptor else {}
+		local overrides = if typeof(descriptor.InstanceOverrides) == "table"
+			then cloneValue(descriptor.InstanceOverrides)
+			elseif typeof(request.InstanceOverrides) == "table" then cloneValue(request.InstanceOverrides)
+			else {}
+		overrides.DeferIndexShadowRefresh = true
+		overrides.DeferIndexDiscovery = true
+
+		local storageName = tostring(descriptor.CrewMemberName or request.CrewMemberName or overrides.StorageName or "")
+		if storageName == "" then
+			failures[#failures + 1] = slotName .. ":missing_crew_member"
+			continue
+		end
+
+		local expectedStorageName = getExpectedStorageName({
+			ExpectedIncomingStorageName = request.ExpectedIncomingStorageName or descriptor.CrewMemberName or storageName,
+		})
+		local incomingId, incomingData, createReason =
+			createInstanceInternal(player, finalInventory, storageName, overrides)
+		if not incomingData then
+			failures[#failures + 1] = slotName .. ":" .. tostring(createReason or "create_instance_failed")
+			continue
+		end
+
+		if expectedStorageName ~= "" and getInstanceCrewKey(incomingData) ~= expectedStorageName then
+			removeInstanceFromInventory(finalInventory, incomingId)
+			failures[#failures + 1] = slotName .. ":ownership_mismatch"
+			continue
+		end
+
+		if fillMode == "ReplaceAll" and occupied then
+			local standData = getStandData(player, slotName)
+			local outgoingId, outgoingData, outgoingReason =
+				findExistingStandInstance(finalInventory, slotName, standData)
+			if not outgoingData then
+				removeInstanceFromInventory(finalInventory, incomingId)
+				failures[#failures + 1] = slotName .. ":" .. tostring(outgoingReason or "outgoing_instance_missing")
+				continue
+			end
+			if tostring(outgoingId) == tostring(incomingId) then
+				removeInstanceFromInventory(finalInventory, incomingId)
+				failures[#failures + 1] = slotName .. ":incoming_already_assigned"
+				continue
+			end
+
+			local finalOutgoing = cloneValue(outgoingData)
+			finalOutgoing.AssignedStand = ""
+			finalOutgoing.LastReleasedAt = now
+			finalInventory.ById[tostring(outgoingId)] = finalOutgoing
+			moveInstanceToFront(finalInventory, outgoingId)
+			assignReleasedToQuickSlot(outgoingId)
+			replaced += 1
+		elseif occupied then
+			removeInstanceFromInventory(finalInventory, incomingId)
+			failures[#failures + 1] = slotName .. ":stand_occupied"
+			continue
+		end
+
+		incomingData.AssignedStand = slotName
+		finalInventory.ById[tostring(incomingId)] = incomingData
+		standRows[#standRows + 1] = {
+			SlotName = slotName,
+			Updates = buildStandAssignmentRow(incomingId, incomingData),
+		}
+		createdRecords[#createdRecords + 1] = {
+			InstanceId = tostring(incomingId),
+			SlotName = slotName,
+			CrewMemberName = getInstanceCrewKey(incomingData),
+			Rarity = tostring(incomingData.Rarity or ""),
+			Variant = tostring(incomingData.Variant or ""),
+			BaseName = tostring(incomingData.BaseName or ""),
+		}
+		filled += 1
+	end
+
+	if filled <= 0 then
+		return {
+			Success = #failures == 0,
+			Changed = false,
+			Reason = if #failures == 0 then "no_slots_filled" else "no_slots_filled_with_failures",
+			Counters = counters,
+			Created = createdRecords,
+			Failures = failures,
+			Skipped = skipped,
+			Filled = filled,
+			Replaced = replaced,
+		}
+	end
+
+	local occupiedInstances = countStoredInstancesWithAssignments(finalInventory, quickAssignments)
+	local storageSlots = if typeof(CrewQuickSlotService.GetInventoryStorageSlots) == "function"
+		then CrewQuickSlotService.GetInventoryStorageSlots(player)
+		else 0
+	local canFit = occupiedInstances <= storageSlots
+	local storageReason = if canFit then "ok" else "crew_inventory_full"
+	if canFit ~= true then
+		return {
+			Success = false,
+			Changed = false,
+			Reason = tostring(storageReason or "crew_inventory_full"),
+			Counters = counters,
+			Created = {},
+			Failures = {
+				string.format(
+					"capacity:%s occupied=%s storageSlots=%s maxSlots=%s",
+					tostring(storageReason or "crew_inventory_full"),
+					tostring(occupiedInstances),
+					tostring(storageSlots),
+					tostring(storageSlots)
+				),
+			},
+			Skipped = skipped,
+			Filled = 0,
+			Replaced = 0,
+		}
+	end
+
+	local canonicalInventory = normalizeInventoryData(cloneValue(finalInventory), {
+		Canonical = true,
+	})
+	local operations = {
+		{
+			Kind = "Set",
+			Path = CANONICAL_INVENTORY_PATH,
+			Value = canonicalInventory,
+		},
+	}
+	local seenPaths = {
+		[CANONICAL_INVENTORY_PATH] = true,
+	}
+	for _, standRow in ipairs(standRows) do
+		local operation = CrewStandIncomeAuthority.BuildStandSetOperation(player, standRow.SlotName, standRow.Updates)
+		if seenPaths[operation.Path] ~= true then
+			seenPaths[operation.Path] = true
+			operations[#operations + 1] = operation
+		end
+	end
+	if quickAssignmentsChanged == true then
+		local quickSlotPath = "CrewMemberQuickSlots.Assignments"
+		seenPaths[quickSlotPath] = true
+		operations[#operations + 1] = {
+			Kind = "Set",
+			Path = quickSlotPath,
+			Value = quickAssignments,
+		}
+	end
+	for _, createdRecord in ipairs(createdRecords) do
+		local instanceData = canonicalInventory.ById[tostring(createdRecord.InstanceId)]
+		local operation = buildIndexDiscoveryOperation(player, instanceData, seenPaths)
+		if operation then
+			operations[#operations + 1] = operation
+		end
+	end
+
+	if isAdminFillShipBulkCancelled(cancelToken) then
+		warn(string.format(
+			"[AdminFillShip] bulk_commit_cancelled target=%s source=%s filled=%d replaced=%d",
+			getAdminFillShipBulkPlayerLabel(player),
+			sourcePath,
+			filled,
+			replaced
+		))
+		return {
+			Success = false,
+			Changed = false,
+			Reason = "cancelled",
+			Counters = counters,
+			Created = {},
+			Failures = { "cancelled:before_bulk_commit" },
+			Skipped = skipped,
+			Filled = 0,
+			Replaced = 0,
+		}
+	end
+
+	print(string.format(
+		"[AdminFillShip] bulk_commit_begin target=%s source=%s operations=%d filled=%d replaced=%d created=%d",
+		getAdminFillShipBulkPlayerLabel(player),
+		sourcePath,
+		#operations,
+		filled,
+		replaced,
+		#createdRecords
+	))
+	local ok, batchResult = getDataManager():TryApplyBatch(player, operations, {
+		PerfContext = {
+			Target = sourcePath,
+		},
+	})
+	if ok ~= true then
+		warn(string.format(
+			"[AdminFillShip] bulk_commit_failed target=%s source=%s operations=%d reason=%s",
+			getAdminFillShipBulkPlayerLabel(player),
+			sourcePath,
+			#operations,
+			tostring(batchResult and batchResult.Reason or "batch_failed")
+		))
+		return {
+			Success = false,
+			Changed = false,
+			Reason = tostring(batchResult and batchResult.Reason or "batch_failed"),
+			Counters = counters,
+			Created = {},
+			Failures = {
+				"batch:" .. tostring(batchResult and batchResult.Reason or "batch_failed"),
+			},
+			Skipped = skipped,
+			Filled = 0,
+			Replaced = 0,
+			BatchResult = batchResult,
+		}
+	end
+	print(string.format(
+		"[AdminFillShip] bulk_commit_ok target=%s source=%s operations=%d replicaWriteCount=%s",
+		getAdminFillShipBulkPlayerLabel(player),
+		sourcePath,
+		#operations,
+		tostring(batchResult and batchResult.ReplicaWriteCount or "unknown")
+	))
+
+	print(string.format(
+		"[AdminFillShip] inventory_notify_begin target=%s source=%s",
+		getAdminFillShipBulkPlayerLabel(player),
+		sourcePath
+	))
+	notifyInventorySaved(player, canonicalInventory, {
+		Source = "AdminFillShipBulk",
+		Reason = "admin_fill_ship_bulk",
+		SkipStandRuntimeRefresh = true,
+		Counters = counters,
+	})
+	print(string.format(
+		"[AdminFillShip] inventory_notify_ok target=%s source=%s inventoryNotifyCount=%d",
+		getAdminFillShipBulkPlayerLabel(player),
+		sourcePath,
+		tonumber(counters.InventoryNotifyCount) or 0
+	))
+	incrementCounter(counters, "StandIncomeWriteCount", #standRows)
+	CrewStandIncomeAuthority.RecordExternalIncomeWrite(#standRows)
+	syncAvailableCounts(player, canonicalInventory)
+	refreshCrewMemberShadow(player, "admin_fill_ship_bulk")
+	updateInventoryAuthorityAudit(player, {
+		LastAdminFillShipBulk = {
+			CompletedAt = os.time(),
+			Filled = filled,
+			Replaced = replaced,
+			Created = #createdRecords,
+			OperationCount = #operations,
+			ReplicaWriteCount = batchResult and batchResult.ReplicaWriteCount or nil,
+		},
+		ClearKeys = {
+			"LastFailClosedReason",
+			"LastFailClosedIssues",
+		},
+	})
+
+	return {
+		Success = true,
+		Changed = true,
+		Reason = "ok",
+		Counters = counters,
+		Created = createdRecords,
+		Failures = failures,
+		Skipped = skipped,
+		Filled = filled,
+		Replaced = replaced,
+		BatchResult = batchResult,
+		OperationCount = #operations,
+		StandWriteCount = #standRows,
+	}
 end
 
 function Module.ReleaseStandInstance(player, standName, options)

@@ -17,14 +17,19 @@ local ChestOverhead = require(Modules:WaitForChild("ChestOverhead"))
 local UIStrokeAdjuster = require(script.Parent.Parent:WaitForChild("Library"):WaitForChild("UIStrokeAdjuster"))
 local CrewOverheadBillboard = require(UiFolder:WaitForChild("Crew"):WaitForChild("CrewOverheadBillboard"))
 local ChestOverheadBillboard = require(UiFolder:WaitForChild("ChestOverheadBillboard"))
+local ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
 
 local OVERHEAD_ATTRIBUTES = CrewOverhead.Attribute
 local CHEST_OVERHEAD_ATTRIBUTES = ChestOverhead.Attribute
 local CARRIED_MODEL_ATTRIBUTE = "CrewCarryHeld"
+local CLIENT_PLACED_CREW_ATTRIBUTE = "ClientPlacedCrewVisual"
+local CLIENT_PLACED_CREW_OVERHEAD_ALLOWED_ATTRIBUTE = "ClientPlacedCrewAllowOverhead"
 local TRACK_KIND_CREW = "Crew"
 local TRACK_KIND_CHEST = "Chest"
 local CREW_OVERHEAD_MAX_DISTANCE = 260
 local CHEST_OVERHEAD_MAX_DISTANCE = 360
+local CLIENT_LOD = ShipVisuals.ClientLod or {}
+local MAX_VISIBLE_CREW_OVERHEADS = math.max(1, math.floor(tonumber(CLIENT_LOD.VisibleCrewOverheadCap) or 24))
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactCrewOverheadRoot"
@@ -196,13 +201,21 @@ local function buildEntries(now)
 				local kind = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.Kind) or "")
 				if kind ~= "" then
 					local held = model:GetAttribute(CARRIED_MODEL_ATTRIBUTE) == true
-					if not held and (adornee.Position - focusPosition).Magnitude > CREW_OVERHEAD_MAX_DISTANCE then
+					local distance = (adornee.Position - focusPosition).Magnitude
+					if not held and distance > CREW_OVERHEAD_MAX_DISTANCE then
+						continue
+					end
+					if
+						model:GetAttribute(CLIENT_PLACED_CREW_ATTRIBUTE) == true
+						and model:GetAttribute(CLIENT_PLACED_CREW_OVERHEAD_ALLOWED_ATTRIBUTE) ~= true
+					then
 						continue
 					end
 
 					local expiresAt = tonumber(model:GetAttribute(OVERHEAD_ATTRIBUTES.ExpiresAt))
 					local variantAttribute = model:GetAttribute(OVERHEAD_ATTRIBUTES.Variant)
 					crewEntries[#crewEntries + 1] = {
+						distance = distance,
 						key = key,
 						adornee = adornee,
 						kind = kind,
@@ -217,6 +230,7 @@ local function buildEntries(now)
 						protectionLabel = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.ProtectionLabel) or ""),
 						protectionDetail = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.ProtectionDetail) or ""),
 						held = held,
+						isClientPlaced = model:GetAttribute(CLIENT_PLACED_CREW_ATTRIBUTE) == true,
 						remaining = if expiresAt then math.max(0, expiresAt - now) else nil,
 						despawnSeconds = tonumber(model:GetAttribute(OVERHEAD_ATTRIBUTES.DespawnSeconds)),
 					}
@@ -226,8 +240,20 @@ local function buildEntries(now)
 	end
 
 	table.sort(crewEntries, function(a, b)
+		if a.held ~= b.held then
+			return a.held == true
+		end
+		if a.isClientPlaced ~= b.isClientPlaced then
+			return a.isClientPlaced ~= true
+		end
+		if a.distance ~= b.distance then
+			return a.distance < b.distance
+		end
 		return tostring(a.key) < tostring(b.key)
 	end)
+	while #crewEntries > MAX_VISIBLE_CREW_OVERHEADS do
+		table.remove(crewEntries)
+	end
 	table.sort(chestEntries, function(a, b)
 		return tostring(a.key) < tostring(b.key)
 	end)

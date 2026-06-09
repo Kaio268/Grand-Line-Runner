@@ -37,6 +37,7 @@ local SHIP_FINALIZE_SUCCESS_RESULT = "finalized_real_ship_ok"
 
 local runtimeStateByPlayer = {}
 local pendingRefreshAfterResetByPlayer = setmetatable({}, { __mode = "k" })
+local markerCacheByShip = setmetatable({}, { __mode = "k" })
 local warnedKeys = {}
 local started = false
 
@@ -47,6 +48,9 @@ local OWNER_ONLY_ATTRIBUTE = ATTR.OwnerOnlyInteraction or "ShipOwnerOnlyInteract
 local INTERACTION_KIND_ATTRIBUTE = ATTR.InteractionKind or "ShipInteractionKind"
 local INTERACTION_KINDS = ShipVisuals.InteractionKinds or {}
 local WORLD_UP = Vector3.new(0, 1, 0)
+local CLIENT_LOD = ShipVisuals.ClientLod or {}
+local SLOT_LEVEL_PANEL_MAX_DISTANCE = math.max(1, tonumber(CLIENT_LOD.SlotLevelPanelMaxDistance) or 48)
+local CLAIM_BILLBOARD_MAX_DISTANCE = math.max(1, tonumber(CLIENT_LOD.ClaimBillboardMaxDistance) or 24)
 
 local function getInstancePath(instance)
 	if typeof(instance) == "Instance" then
@@ -990,6 +994,13 @@ local function sanitizeRuntimeDescendant(descendant, preservePhysics, allowScrip
 		end
 	elseif not allowScripts and (descendant:IsA("Script") or descendant:IsA("LocalScript")) then
 		descendant.Disabled = true
+	elseif descendant:IsA("SurfaceGui") then
+		descendant.MaxDistance = SLOT_LEVEL_PANEL_MAX_DISTANCE
+		descendant.Enabled = false
+	elseif descendant:IsA("BillboardGui") then
+		if descendant.MaxDistance <= 0 or descendant.MaxDistance > CLAIM_BILLBOARD_MAX_DISTANCE then
+			descendant.MaxDistance = CLAIM_BILLBOARD_MAX_DISTANCE
+		end
 	end
 
 	return walkableCollisionParts, runtimeCollidableParts
@@ -1077,32 +1088,55 @@ local function findMarkerByName(activeShip, markerName)
 		return nil
 	end
 
-	local directMarker = activeShip:FindFirstChild(markerName, true)
+	local cache = markerCacheByShip[activeShip]
+	if not cache then
+		cache = {}
+		markerCacheByShip[activeShip] = cache
+	end
+
+	local cachedMarker = cache[markerName]
+	if cachedMarker
+		and cachedMarker.Parent ~= nil
+		and cachedMarker:IsDescendantOf(activeShip)
+		and not isRuntimePointDescendant(activeShip, cachedMarker)
+		and getInstanceCFrame(cachedMarker) ~= nil
+	then
+		return cachedMarker
+	end
+
+	local directMarker = activeShip:FindFirstChild(markerName)
 	if directMarker
 		and not isRuntimePointDescendant(activeShip, directMarker)
 		and getInstanceCFrame(directMarker) ~= nil
 	then
+		cache[markerName] = directMarker
 		return directMarker
 	end
 
+	local caseInsensitiveCandidate = nil
 	for _, descendant in ipairs(activeShip:GetDescendants()) do
 		if descendant.Name == markerName
 			and not isRuntimePointDescendant(activeShip, descendant)
 			and getInstanceCFrame(descendant) ~= nil
 		then
+			cache[markerName] = descendant
 			return descendant
 		end
-	end
 
-	for _, descendant in ipairs(activeShip:GetDescendants()) do
 		if namesMatchIgnoringCase(descendant.Name, markerName)
 			and not isRuntimePointDescendant(activeShip, descendant)
 			and getInstanceCFrame(descendant) ~= nil
 		then
-			return descendant
+			caseInsensitiveCandidate = caseInsensitiveCandidate or descendant
 		end
 	end
 
+	if caseInsensitiveCandidate then
+		cache[markerName] = caseInsensitiveCandidate
+		return caseInsensitiveCandidate
+	end
+
+	cache[markerName] = nil
 	return nil
 end
 

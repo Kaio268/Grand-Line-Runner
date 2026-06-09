@@ -1223,6 +1223,41 @@ function CrewIdleAnimator.Stop(modelOrController, fadeTime, reason)
 	controller.CurrentTrack = nil
 end
 
+function CrewIdleAnimator.PrepareStatic(model)
+	if typeof(model) ~= "Instance" or not model:IsA("Model") then
+		return false, "invalid_model"
+	end
+
+	CrewIdleAnimator.Stop(model, 0, "static_lod")
+
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("Animator") or descendant:IsA("AnimationController") then
+			descendant:Destroy()
+		elseif descendant:IsA("Humanoid") then
+			descendant.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+			descendant.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+			descendant.NameDisplayDistance = 0
+			descendant.HealthDisplayDistance = 0
+			descendant.AutoRotate = false
+			pcall(function()
+				descendant.EvaluateStateMachine = false
+			end)
+			pcall(function()
+				descendant.PlatformStand = true
+			end)
+		elseif descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+			descendant.AssemblyLinearVelocity = Vector3.zero
+			descendant.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+
+	return true, "ok"
+end
+
 function CrewIdleAnimator.Start(model, options)
 	if typeof(model) ~= "Instance" or not model:IsA("Model") then
 		return nil, "invalid_model"

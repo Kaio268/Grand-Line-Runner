@@ -7,6 +7,8 @@ local CrewAuraVisuals = {}
 local AURA_ROOT_NAME = "Auras"
 local AURA_CLONE_NAME = "CrewVariantAura"
 local AURA_WELD_NAME = "CrewVariantAuraWeld"
+local AURA_BASE_ENABLED_ATTRIBUTE = "CrewAuraBaseEnabled"
+local AURA_POOL_MAX_PER_VARIANT = 8
 local AURA_TARGET_PRIORITY = {
 	"HumanoidRootPart",
 	"Torso",
@@ -18,6 +20,27 @@ local SUPPORTED_VARIANTS = {
 	Golden = true,
 	Diamond = true,
 }
+
+local QUALITY_RATE_SCALE = {
+	Full = 1,
+	Medium = 0.38,
+}
+
+local auraPoolByVariant = {}
+local diagnostics = {
+	Cloned = 0,
+	Pooled = 0,
+	Reused = 0,
+	Removed = 0,
+}
+
+local function incrementDiagnostic(name)
+	diagnostics[name] = (tonumber(diagnostics[name]) or 0) + 1
+end
+
+function CrewAuraVisuals.GetDiagnostics()
+	return table.clone(diagnostics)
+end
 
 local function getAssetsRoot()
 	return ReplicatedStorage:FindFirstChild("Assets")
@@ -96,6 +119,14 @@ local function resolveVariant(options)
 	end
 
 	return "Normal"
+end
+
+local function normalizeQuality(value)
+	local text = tostring(value or "Full")
+	if text == "Medium" then
+		return "Medium"
+	end
+	return "Full"
 end
 
 local function getAuraAsset(variant)
@@ -297,6 +328,127 @@ local function weldAuraParts(clone, targetPart)
 	return welded
 end
 
+local function applyAuraQuality(clone, quality)
+	local normalizedQuality = normalizeQuality(quality)
+	local rateScale = QUALITY_RATE_SCALE[normalizedQuality] or QUALITY_RATE_SCALE.Full
+
+	local function applyEmitter(emitter)
+		local baseRate = tonumber(emitter:GetAttribute("CrewAuraBaseRate")) or tonumber(emitter.Rate) or 0
+		emitter:SetAttribute("CrewAuraBaseRate", baseRate)
+		emitter.Rate = math.max(0, baseRate * rateScale)
+	end
+
+	if clone:IsA("ParticleEmitter") then
+		applyEmitter(clone)
+	end
+	for _, descendant in ipairs(clone:GetDescendants()) do
+		if descendant:IsA("ParticleEmitter") then
+			applyEmitter(descendant)
+		end
+	end
+
+	clone:SetAttribute("CrewAuraQuality", normalizedQuality)
+end
+
+local function setAuraEnabled(root, enabled)
+	if typeof(root) ~= "Instance" then
+		return
+	end
+
+	local function setEnabled(instance)
+		if instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") then
+			if enabled == true then
+				local baseEnabled = instance:GetAttribute(AURA_BASE_ENABLED_ATTRIBUTE)
+				if baseEnabled ~= nil then
+					instance.Enabled = baseEnabled == true
+				end
+			else
+				if instance:GetAttribute(AURA_BASE_ENABLED_ATTRIBUTE) == nil then
+					instance:SetAttribute(AURA_BASE_ENABLED_ATTRIBUTE, instance.Enabled == true)
+				end
+				instance.Enabled = false
+			end
+		elseif instance:IsA("WeldConstraint") and instance.Name == AURA_WELD_NAME then
+			if enabled == true then
+				instance.Enabled = true
+			else
+				instance.Enabled = false
+			end
+		end
+	end
+
+	setEnabled(root)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		setEnabled(descendant)
+	end
+end
+
+local function findAttachedAura(root)
+	if typeof(root) ~= "Instance" then
+		return nil
+	end
+
+	for _, child in ipairs(root:GetChildren()) do
+		if child.Name == AURA_CLONE_NAME then
+			return child
+		end
+	end
+	return nil
+end
+
+local function getAuraPool(variant)
+	local key = normalizeVariant(variant)
+	local pool = auraPoolByVariant[key]
+	if not pool then
+		pool = {}
+		auraPoolByVariant[key] = pool
+	end
+	return pool
+end
+
+local function acquireAuraClone(source, variant)
+	local pool = getAuraPool(variant)
+	while #pool > 0 do
+		local clone = table.remove(pool)
+		if typeof(clone) == "Instance" then
+			incrementDiagnostic("Reused")
+			return clone, true
+		end
+	end
+
+	local clone = source:Clone()
+	clone.Name = AURA_CLONE_NAME
+	stripUnsafeDescendants(clone)
+	normalizeAuraTree(clone)
+	incrementDiagnostic("Cloned")
+	return clone, false
+end
+
+local function releaseAuraClone(clone)
+	if typeof(clone) ~= "Instance" then
+		return
+	end
+
+	local variant = normalizeVariant(clone:GetAttribute("CrewAuraVariant"))
+	setAuraEnabled(clone, false)
+	clone.Parent = nil
+	incrementDiagnostic("Removed")
+
+	if not SUPPORTED_VARIANTS[variant] then
+		clone:Destroy()
+		return
+	end
+
+	local pool = getAuraPool(variant)
+	if #pool >= AURA_POOL_MAX_PER_VARIANT then
+		clone:Destroy()
+		return
+	end
+
+	pool[#pool + 1] = clone
+	incrementDiagnostic("Pooled")
+end
+
 function CrewAuraVisuals.Remove(root)
 	if typeof(root) ~= "Instance" then
 		return
@@ -304,7 +456,7 @@ function CrewAuraVisuals.Remove(root)
 
 	for _, child in ipairs(root:GetChildren()) do
 		if child.Name == AURA_CLONE_NAME then
-			child:Destroy()
+			releaseAuraClone(child)
 		end
 	end
 end
@@ -334,15 +486,20 @@ function CrewAuraVisuals.Apply(root, options)
 		return nil, "missing_target_part"
 	end
 
-	CrewAuraVisuals.Remove(root)
+	local clone = findAttachedAura(root)
+	if clone and normalizeVariant(clone:GetAttribute("CrewAuraVariant")) ~= variant then
+		releaseAuraClone(clone)
+		clone = nil
+	end
 
-	local clone = source:Clone()
-	clone.Name = AURA_CLONE_NAME
-	stripUnsafeDescendants(clone)
-	normalizeAuraTree(clone)
+	if not clone then
+		clone = acquireAuraClone(source, variant)
+	end
 	clone.Parent = root
 	pivotCloneToTarget(clone, targetPart, getSourceOffset(auraAsset, source))
 	weldAuraParts(clone, targetPart)
+	applyAuraQuality(clone, options.Quality or options.quality)
+	setAuraEnabled(clone, true)
 
 	clone:SetAttribute("CrewAuraVariant", variant)
 	clone:SetAttribute("CrewAuraTarget", targetPart.Name)

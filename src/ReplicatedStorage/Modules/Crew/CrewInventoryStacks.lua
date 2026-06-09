@@ -74,12 +74,17 @@ local function resolveCrewMember(instanceData)
 end
 
 local function getStackRarity(instanceData, info)
+	local instanceRarity = tostring(instanceData and instanceData.Rarity or "")
+	if instanceRarity ~= "" then
+		return CrewStacking.NormalizeRarity(instanceRarity)
+	end
+
 	local catalogRarity = tostring(info and info.Rarity or "")
 	if catalogRarity ~= "" then
 		return CrewStacking.NormalizeRarity(catalogRarity)
 	end
 
-	return CrewStacking.NormalizeRarity(instanceData and instanceData.Rarity or nil)
+	return CrewStacking.NormalizeRarity(nil)
 end
 
 local function createStack(crewMemberId, rarity, maxQuantity, stackNumber, sortOrder)

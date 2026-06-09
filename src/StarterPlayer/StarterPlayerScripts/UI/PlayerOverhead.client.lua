@@ -12,6 +12,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
 local UIStrokeAdjuster = require(script.Parent.Parent:WaitForChild("Library"):WaitForChild("UIStrokeAdjuster"))
 local PlayerOverheadBillboard = require(UiFolder:WaitForChild("Player"):WaitForChild("PlayerOverheadBillboard"))
 
@@ -27,6 +28,8 @@ local HORO_ATTRIBUTES = {
 }
 
 local PLAYER_OVERHEAD_MAX_DISTANCE = 300
+local CLIENT_LOD = ShipVisuals.ClientLod or {}
+local MAX_VISIBLE_PLAYER_OVERHEADS = math.max(1, math.floor(tonumber(CLIENT_LOD.VisiblePlayerOverheadCap) or 12))
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactPlayerOverheadRoot"
@@ -375,7 +378,8 @@ local function buildEntries(now)
 			local endTime = tonumber(player:GetAttribute("HoroProjectionEndTime"))
 			local horoActive = player:GetAttribute("HoroProjectionActive") == true
 			local alwaysVisible = player == localPlayer or horoActive and endTime ~= nil
-			if not alwaysVisible and (adornee.Position - focusPosition).Magnitude > PLAYER_OVERHEAD_MAX_DISTANCE then
+			local distance = (adornee.Position - focusPosition).Magnitude
+			if not alwaysVisible and distance > PLAYER_OVERHEAD_MAX_DISTANCE then
 				continue
 			end
 
@@ -387,6 +391,8 @@ local function buildEntries(now)
 			local speedBoostValue = potions and potions:FindFirstChild("x15WalkSpeedTime")
 
 			entries[#entries + 1] = {
+				alwaysVisible = alwaysVisible,
+				distance = distance,
 				key = key,
 				adornee = adornee,
 				playerName = player.Name,
@@ -401,8 +407,21 @@ local function buildEntries(now)
 	end
 
 	table.sort(entries, function(a, b)
+		if a.alwaysVisible ~= b.alwaysVisible then
+			return a.alwaysVisible == true
+		end
+		if a.distance ~= b.distance then
+			return a.distance < b.distance
+		end
 		return tostring(a.key) < tostring(b.key)
 	end)
+	while #entries > MAX_VISIBLE_PLAYER_OVERHEADS do
+		local last = entries[#entries]
+		if last and last.alwaysVisible == true then
+			break
+		end
+		table.remove(entries)
+	end
 
 	return entries
 end

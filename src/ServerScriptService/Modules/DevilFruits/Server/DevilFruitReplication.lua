@@ -32,6 +32,27 @@ local CFRAME_KEYS = {
 	"StartCFrame",
 	"CFrame",
 }
+local diagnostics = {
+	FallbackGlobal = 0,
+	Recipients = 0,
+	Scoped = 0,
+	TargetOnly = 0,
+}
+
+local function recordRoute(route, recipientCount)
+	diagnostics.Recipients += math.max(0, math.floor(tonumber(recipientCount) or 0))
+	if route == "fallback_all" then
+		diagnostics.FallbackGlobal += 1
+	elseif route == "flame_dash_target_only_no_origin" then
+		diagnostics.TargetOnly += 1
+	else
+		diagnostics.Scoped += 1
+	end
+end
+
+function DevilFruitReplication.GetDiagnostics()
+	return table.clone(diagnostics)
+end
 
 local function getPhase(payload)
 	local phase = payload and payload.Phase
@@ -126,7 +147,8 @@ function DevilFruitReplication.FireScoped(remoteBundle, targetPlayer, fruitName,
 	end
 
 	local resolvedPayload = if typeof(payload) == "table" then payload else {}
-	local origin = getPayloadOrigin(resolvedPayload) or getPlayerRootPosition(targetPlayer)
+	local payloadOrigin = getPayloadOrigin(resolvedPayload)
+	local origin = payloadOrigin or getPlayerRootPosition(targetPlayer)
 	if isFlameDashEffect(fruitName, abilityName) then
 		local sent = 0
 		if not origin then
@@ -138,6 +160,7 @@ function DevilFruitReplication.FireScoped(remoteBundle, targetPlayer, fruitName,
 					FLAME_DASH_CHEAP_RADIUS
 				)
 				effectRemote:FireClient(targetPlayer, targetPlayer, fruitName, abilityName, targetPayload)
+				recordRoute("flame_dash_target_only_no_origin", 1)
 				return 1, "flame_dash_target_only_no_origin"
 			end
 			return 0, "flame_dash_no_origin"
@@ -173,15 +196,26 @@ function DevilFruitReplication.FireScoped(remoteBundle, targetPlayer, fruitName,
 			end
 		end
 
+		recordRoute("flame_dash_scoped", sent)
 		return sent, "flame_dash_scoped"
 	end
 
 	if not origin then
 		effectRemote:FireAllClients(targetPlayer, fruitName, abilityName, resolvedPayload)
-		return #Players:GetPlayers(), "fallback_all"
+		local sent = #Players:GetPlayers()
+		recordRoute("fallback_all", sent)
+		return sent, "fallback_all"
 	end
 
 	local radius = getReplicationRadius(resolvedPayload)
+	local scopedPayload = resolvedPayload
+	if not payloadOrigin then
+		scopedPayload = copyPayload(resolvedPayload)
+		scopedPayload.OriginPosition = origin
+		scopedPayload.ReplicationRadius = tonumber(scopedPayload.ReplicationRadius) or radius
+		scopedPayload.ClientMaxDistance = tonumber(scopedPayload.ClientMaxDistance) or radius
+	end
+
 	local sent = 0
 	for _, recipient in ipairs(Players:GetPlayers()) do
 		local shouldSend = recipient == targetPlayer
@@ -192,10 +226,11 @@ function DevilFruitReplication.FireScoped(remoteBundle, targetPlayer, fruitName,
 
 		if shouldSend then
 			sent += 1
-			effectRemote:FireClient(recipient, targetPlayer, fruitName, abilityName, resolvedPayload)
+			effectRemote:FireClient(recipient, targetPlayer, fruitName, abilityName, scopedPayload)
 		end
 	end
 
+	recordRoute("scoped", sent)
 	return sent, "scoped"
 end
 

@@ -38,6 +38,28 @@ local Config = {
 		SlotWorldUi = "SlotWorldUi",
 	},
 
+	ClientLod = {
+		Owner = {
+			FullCrewDistance = 220,
+			ReducedCrewDistance = 460,
+			FullCrewCap = 14,
+		},
+		NonOwner = {
+			FullCrewDistance = 120,
+			ReducedCrewDistance = 260,
+			FullCrewCap = 8,
+		},
+		AnimatedCrewCap = 18,
+		AuraCrewCap = 10,
+		ReducedCrewCap = 64,
+		VisibleCrewOverheadCap = 24,
+		VisiblePlayerOverheadCap = 12,
+		RecentCrewPrioritySeconds = 8,
+		SlotLevelPanelMaxDistance = 48,
+		ClaimBillboardMaxDistance = 24,
+		CaptainBillboardMaxDistance = 24,
+	},
+
 	RuntimeSafetyAttributes = {
 		PreserveCollision = "ShipVisualPreserveCollision",
 		WalkableCollision = "ShipWalkableCollision",

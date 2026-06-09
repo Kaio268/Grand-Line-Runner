@@ -29,6 +29,10 @@ local CAPTAIN_RUNTIME_GUI_NAME = "ShipCaptainSlotLevelUp"
 local INTERACTION_KINDS = ShipVisuals.InteractionKinds or {}
 local MIN_LEVEL_PANEL_PIXELS_PER_STUD = 100
 local MIN_LEVEL_PANEL_CANVAS_SIZE = Vector2.new(1024, 576)
+local CLIENT_LOD = ShipVisuals.ClientLod or {}
+local SLOT_LEVEL_PANEL_MAX_DISTANCE = math.max(1, tonumber(CLIENT_LOD.SlotLevelPanelMaxDistance) or 48)
+local CLAIM_BILLBOARD_MAX_DISTANCE = math.max(1, tonumber(CLIENT_LOD.ClaimBillboardMaxDistance) or 24)
+local CAPTAIN_BILLBOARD_MAX_DISTANCE = math.max(1, tonumber(CLIENT_LOD.CaptainBillboardMaxDistance) or 24)
 
 local SLOT_ATTRIBUTES = {
 	Visible = "ShipSlotVisible",
@@ -49,6 +53,8 @@ local CAPTAIN_ATTRIBUTES = {
 
 local playerState = {}
 local warned = {}
+local levelUpPartCache = setmetatable({}, { __mode = "k" })
+local descendantsCacheByRoot = setmetatable({}, { __mode = "k" })
 
 local function warnOnce(key, message, ...)
 	if warned[key] then
@@ -75,6 +81,34 @@ end
 
 local function getPlayerGui(player)
 	return player and player:FindFirstChild("PlayerGui") or nil
+end
+
+local function isValidCachedDescendant(instance, root)
+	return instance ~= nil and instance.Parent ~= nil and root ~= nil and instance:IsDescendantOf(root)
+end
+
+local function getCachedDescendants(root)
+	if typeof(root) ~= "Instance" then
+		return {}
+	end
+
+	local cached = descendantsCacheByRoot[root]
+	if typeof(cached) == "table" and #cached > 0 then
+		local valid = true
+		for _, descendant in ipairs(cached) do
+			if not isValidCachedDescendant(descendant, root) then
+				valid = false
+				break
+			end
+		end
+		if valid then
+			return cached
+		end
+	end
+
+	local descendants = root:GetDescendants()
+	descendantsCacheByRoot[root] = descendants
+	return descendants
 end
 
 local function getPlayerUpgradeLevel(player, override)
@@ -220,6 +254,7 @@ local function configureLevelPanelSurfaceGui(surfaceGui)
 	end
 
 	surfaceGui.LightInfluence = 0
+	surfaceGui.MaxDistance = SLOT_LEVEL_PANEL_MAX_DISTANCE
 
 	if surfaceGui.SizingMode == Enum.SurfaceGuiSizingMode.PixelsPerStud then
 		surfaceGui.PixelsPerStud = math.max(surfaceGui.PixelsPerStud, MIN_LEVEL_PANEL_PIXELS_PER_STUD)
@@ -229,6 +264,17 @@ local function configureLevelPanelSurfaceGui(surfaceGui)
 			math.max(canvasSize.X, MIN_LEVEL_PANEL_CANVAS_SIZE.X),
 			math.max(canvasSize.Y, MIN_LEVEL_PANEL_CANVAS_SIZE.Y)
 		)
+	end
+end
+
+local function configureBillboardGui(billboardGui, maxDistance)
+	if not billboardGui or not billboardGui:IsA("BillboardGui") then
+		return
+	end
+
+	local cap = math.max(1, tonumber(maxDistance) or CLAIM_BILLBOARD_MAX_DISTANCE)
+	if billboardGui.MaxDistance <= 0 or billboardGui.MaxDistance > cap then
+		billboardGui.MaxDistance = cap
 	end
 end
 
@@ -330,8 +376,14 @@ local function getClaimHitBox(slotModel)
 end
 
 local function getLevelUpPart(slotModel)
+	local cached = levelUpPartCache[slotModel]
+	if cached and cached:IsA("BasePart") and isValidCachedDescendant(cached, slotModel) then
+		return cached
+	end
+
 	local levelUp = slotModel:FindFirstChild("LevelUp", true)
 	if levelUp and levelUp:IsA("BasePart") then
+		levelUpPartCache[slotModel] = levelUp
 		return levelUp
 	end
 
@@ -368,8 +420,9 @@ local function markSlotClaimUi(player, slotModel, slotKey)
 	end
 
 	local claimContainer = ShipSlotService.GetClaimContainer(slotModel) or slotModel
-	for _, descendant in ipairs(claimContainer:GetDescendants()) do
+	for _, descendant in ipairs(getCachedDescendants(claimContainer)) do
 		if descendant:IsA("BillboardGui") then
+			configureBillboardGui(descendant, CLAIM_BILLBOARD_MAX_DISTANCE)
 			markOwnerOnlyInteraction(descendant, player, INTERACTION_KINDS.ClaimPad or "ClaimPad", slotKey)
 		end
 	end
@@ -383,7 +436,7 @@ local function markSlotWorldUi(player, slotModel, slotKey)
 
 	markOwnerOnlyInteraction(levelUpPart, player, INTERACTION_KINDS.SlotWorldUi or "SlotWorldUi", slotKey)
 
-	for _, descendant in ipairs(levelUpPart:GetDescendants()) do
+	for _, descendant in ipairs(getCachedDescendants(levelUpPart)) do
 		if descendant:IsA("SurfaceGui") or descendant:IsA("ClickDetector") then
 			markOwnerOnlyInteraction(descendant, player, INTERACTION_KINDS.SlotWorldUi or "SlotWorldUi", slotKey)
 		end
@@ -412,8 +465,9 @@ local function markCaptainInteractions(player, captainSpot, handle, prompt)
 	markSlotClaimUi(player, captainSpot, CAPTAIN_SLOT_KEY)
 	markSlotWorldUi(player, captainSpot, CAPTAIN_SLOT_KEY)
 
-	for _, descendant in ipairs(captainSpot:GetDescendants()) do
+	for _, descendant in ipairs(getCachedDescendants(captainSpot)) do
 		if descendant:IsA("BillboardGui") and descendant:GetAttribute(INTERACTION_KIND_ATTRIBUTE) == nil then
+			configureBillboardGui(descendant, CAPTAIN_BILLBOARD_MAX_DISTANCE)
 			markOwnerOnlyInteraction(descendant, player, INTERACTION_KINDS.CaptainSlot or "CaptainSlot", CAPTAIN_SLOT_KEY)
 		end
 	end
@@ -528,6 +582,7 @@ local function setupLevelUpSurfaceGui(player, activeShip, slotModel, slotName, s
 		local levelUpPart = getLevelUpPart(slotModel)
 		local sourceGui = levelUpPart and levelUpPart:FindFirstChildOfClass("SurfaceGui")
 		if sourceGui then
+			configureLevelPanelSurfaceGui(sourceGui)
 			sourceGui.Enabled = false
 		end
 
@@ -552,6 +607,7 @@ local function setupLevelUpSurfaceGui(player, activeShip, slotModel, slotName, s
 
 	local existingGui = getExistingRuntimeGui(player, activeShip, slotName, levelUpPart)
 	if existingGui then
+		configureLevelPanelSurfaceGui(existingGui)
 		cleanupRuntimeGuiBySlot(player, slotName, existingGui)
 		return
 	end
@@ -569,6 +625,7 @@ local function setupLevelUpSurfaceGui(player, activeShip, slotModel, slotName, s
 	end
 
 	local surfaceGui = sourceGui:Clone()
+	configureLevelPanelSurfaceGui(sourceGui)
 	sourceGui.Enabled = false
 	surfaceGui.Adornee = levelUpPart
 	surfaceGui.Enabled = false
@@ -585,6 +642,7 @@ local function setupCaptainLevelUpSurfaceGui(player, activeShip, captainSpot, ca
 	local sourceGui = levelUpPart and levelUpPart:FindFirstChildOfClass("SurfaceGui")
 	if captainInfo.Unlocked ~= true then
 		if sourceGui then
+			configureLevelPanelSurfaceGui(sourceGui)
 			sourceGui.Enabled = false
 		end
 		cleanupCaptainRuntimeGui(player)
@@ -599,6 +657,7 @@ local function setupCaptainLevelUpSurfaceGui(player, activeShip, captainSpot, ca
 
 	local existingGui = getExistingCaptainRuntimeGui(player, activeShip, levelUpPart)
 	if existingGui then
+		configureLevelPanelSurfaceGui(existingGui)
 		cleanupCaptainRuntimeGui(player, existingGui)
 		local state = getState(player)
 		state.captainGui = existingGui
@@ -617,6 +676,7 @@ local function setupCaptainLevelUpSurfaceGui(player, activeShip, captainSpot, ca
 	end
 
 	local surfaceGui = sourceGui:Clone()
+	configureLevelPanelSurfaceGui(sourceGui)
 	sourceGui.Enabled = false
 	surfaceGui.Adornee = levelUpPart
 	surfaceGui.Enabled = false
@@ -644,7 +704,7 @@ local function disableInteractionDescendants(root)
 	end
 
 	disableInteractionInstance(root)
-	for _, descendant in ipairs(root:GetDescendants()) do
+	for _, descendant in ipairs(getCachedDescendants(root)) do
 		disableInteractionInstance(descendant)
 	end
 end
@@ -662,8 +722,9 @@ local function setTextControlText(label, text)
 end
 
 local function setCaptainDisplayGuisEnabled(captainSpot)
-	for _, descendant in ipairs(captainSpot:GetDescendants()) do
+	for _, descendant in ipairs(getCachedDescendants(captainSpot)) do
 		if descendant:IsA("BillboardGui") then
+			configureBillboardGui(descendant, CAPTAIN_BILLBOARD_MAX_DISTANCE)
 			descendant.Enabled = true
 		end
 	end
@@ -671,12 +732,13 @@ local function setCaptainDisplayGuisEnabled(captainSpot)
 	local levelUpPart = getLevelUpPart(captainSpot)
 	local levelSurface = levelUpPart and levelUpPart:FindFirstChildOfClass("SurfaceGui")
 	if levelSurface then
+		configureLevelPanelSurfaceGui(levelSurface)
 		levelSurface.Enabled = false
 	end
 end
 
 local function setCaptainInteractionEnabled(captainSpot, handle, prompt, enabled)
-	for _, descendant in ipairs(captainSpot:GetDescendants()) do
+	for _, descendant in ipairs(getCachedDescendants(captainSpot)) do
 		if descendant:IsA("ProximityPrompt") then
 			descendant.Enabled = false
 		elseif descendant:IsA("ClickDetector") then

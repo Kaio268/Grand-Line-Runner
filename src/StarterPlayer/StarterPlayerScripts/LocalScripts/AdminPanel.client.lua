@@ -1171,6 +1171,46 @@ local COMMANDS = {
 			return ("Main Event: %s for %ss"):format(inputValue(values, "eventName", "Comet"), inputValue(values, "seconds", "600"))
 		end,
 	},
+	{
+		id = "panel_fill_ship",
+		category = "Panel Actions",
+		marker = "FS",
+		name = "Fill Ship",
+		syntax = "Fill Ship: target + crew + rarity + variant + mode",
+		description = "Fill an online player's current normal ship slots through the existing server-authoritative crew and ship slot pipeline.",
+		example = "Self, Random crew, Random rarity, Random variant, Empty slots only",
+		panelAction = "fillShip",
+		inputs = {
+			{ key = "targetMode", label = "Target", default = "Self", options = { "Self", "Selected Player" } },
+			{ key = "target", label = "Target player name or UserId", placeholder = "blank for self" },
+			{ key = "crewMember", label = "Crew Member", placeholder = "Random or exact crew name", default = "Random" },
+			{
+				key = "rarity",
+				label = "Rarity",
+				default = "Random",
+				options = { "Random", "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Godly", "Secret" },
+			},
+			{ key = "variant", label = "Variant", default = "Random", options = { "Random", "Normal", "Golden", "Diamond" } },
+			{
+				key = "fillMode",
+				label = "Fill Mode",
+				default = "Empty slots only",
+				options = { "Empty slots only", "Replace all ship slots" },
+			},
+		},
+		build = function(values)
+			local targetMode = inputValue(values, "targetMode", "Self")
+			local target = inputValue(values, "target", "")
+			local targetLabel = if string.lower(targetMode) == "self" then "Self" else (target ~= "" and target or "<target>")
+			return ("Fill Ship: %s | %s | %s | %s | %s"):format(
+				targetLabel,
+				inputValue(values, "crewMember", "Random"),
+				inputValue(values, "rarity", "Random"),
+				inputValue(values, "variant", "Random"),
+				inputValue(values, "fillMode", "Empty slots only")
+			)
+		end,
+	},
 }
 
 for _, command in ipairs(COMMANDS) do
@@ -3498,6 +3538,13 @@ local function buildDashboard()
 			if targetUserId then
 				requestPayload.TargetUserId = math.floor(targetUserId)
 			end
+			if typeof(actionSpec.Payload) == "table" then
+				for key, value in pairs(actionSpec.Payload) do
+					if key ~= "Action" and key ~= "Target" and key ~= "TargetUserId" and key ~= "Confirmed" and key ~= "Reason" then
+						requestPayload[key] = value
+					end
+				end
+			end
 
 			local ok, resultPayload = pcall(function()
 				if adminConsoleActionFunction:IsA("RemoteFunction") then
@@ -3792,22 +3839,51 @@ local function buildDashboard()
 					Size = UDim2.new(1, -28, 0, 18),
 					Parent = field,
 				})
-				local box = create("TextBox", {
-					BackgroundTransparency = 1,
-					ClearTextOnFocus = false,
-					Font = BODY_FONT,
-					PlaceholderColor3 = COLORS.Faint,
-					PlaceholderText = input.placeholder or "",
-					Text = input.default or "",
-					TextColor3 = COLORS.Text,
-					TextSize = 15,
-					TextXAlignment = Enum.TextXAlignment.Left,
-					Position = UDim2.fromOffset(14, 28),
-					Size = UDim2.new(1, -28, 0, 26),
-					Parent = field,
-				})
-				inputBoxes[input.key] = box
-				box:GetPropertyChangedSignal("Text"):Connect(updateRunButton)
+				local options = if typeof(input.options) == "table" then input.options else nil
+				if options and #options > 0 then
+					local button = create("TextButton", {
+						AutoButtonColor = true,
+						BackgroundTransparency = 1,
+						Font = BODY_FONT,
+						Text = input.default or tostring(options[1] or ""),
+						TextColor3 = COLORS.Text,
+						TextSize = 15,
+						TextXAlignment = Enum.TextXAlignment.Left,
+						Position = UDim2.fromOffset(14, 28),
+						Size = UDim2.new(1, -28, 0, 26),
+						Parent = field,
+					})
+					button.Activated:Connect(function()
+						local currentIndex = 1
+						for optionIndex, optionValue in ipairs(options) do
+							if tostring(optionValue) == tostring(button.Text) then
+								currentIndex = optionIndex
+								break
+							end
+						end
+						local nextIndex = (currentIndex % #options) + 1
+						button.Text = tostring(options[nextIndex] or "")
+					end)
+					inputBoxes[input.key] = button
+					button:GetPropertyChangedSignal("Text"):Connect(updateRunButton)
+				else
+					local box = create("TextBox", {
+						BackgroundTransparency = 1,
+						ClearTextOnFocus = false,
+						Font = BODY_FONT,
+						PlaceholderColor3 = COLORS.Faint,
+						PlaceholderText = input.placeholder or "",
+						Text = input.default or "",
+						TextColor3 = COLORS.Text,
+						TextSize = 15,
+						TextXAlignment = Enum.TextXAlignment.Left,
+						Position = UDim2.fromOffset(14, 28),
+						Size = UDim2.new(1, -28, 0, 26),
+						Parent = field,
+					})
+					inputBoxes[input.key] = box
+					box:GetPropertyChangedSignal("Text"):Connect(updateRunButton)
+				end
 			end
 		else
 			makeInfoBlock("Required Inputs", "No inputs required.", COLORS.Green).Parent = detailsScroll
@@ -3983,6 +4059,32 @@ local function buildDashboard()
 			local seconds = math.clamp(math.floor(numberValue(values, "seconds", 600) or 600), 1, 86400)
 			mainEventRequestEvent:FireServer(eventName, seconds)
 			return true
+		elseif command.panelAction == "fillShip" then
+			local targetMode = cleanSingleLine(values.targetMode, 40)
+			local target = cleanSingleLine(values.target, 80)
+			local selfTarget = string.lower(targetMode) == "self" or targetMode == ""
+			if not selfTarget and target == "" then
+				setStatus("Enter a target player name or UserId.", COLORS.Red)
+				return false
+			end
+
+			local fillMode = cleanSingleLine(values.fillMode, 40)
+			local replacing = string.lower(fillMode):find("replace") ~= nil
+			setStatus(if replacing then "Confirm Fill Ship replace-all to continue." else "Sending Fill Ship request...", COLORS.Muted)
+			requestConsoleAction({
+				Action = "FillShip",
+				Label = "Fill Ship",
+				Target = if selfTarget then tostring(player.UserId) else target,
+				Dangerous = replacing,
+				Payload = {
+					TargetMode = if selfTarget then "Self" else "Selected Player",
+					CrewMember = cleanSingleLine(values.crewMember, 80),
+					Rarity = cleanSingleLine(values.rarity, 40),
+					Variant = cleanSingleLine(values.variant, 40),
+					FillMode = fillMode,
+				},
+			})
+			return false
 		end
 		return false
 	end

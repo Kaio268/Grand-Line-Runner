@@ -4,6 +4,7 @@ local MessagingService = game:GetService("MessagingService")
 local TextChatService = game:GetService("TextChatService")
 
 local AdminConfig = require(script.Parent:WaitForChild("AdminConfig"))
+local AdminFillShipService = require(script.Parent:WaitForChild("AdminFillShipService"))
 local AdminStaffRoleStore = require(script.Parent:WaitForChild("AdminStaffRoleStore"))
 local AdminAuditLog = require(script.Parent:WaitForChild("AdminAuditLog"))
 local TesterRoleStore = require(script.Parent:WaitForChild("TesterRoleStore"))
@@ -104,6 +105,7 @@ local COMMAND_DISPLAY_NAMES = {
 	chest = "Chest",
 	clear = "Clear inventory",
 	fruit = "Devil Fruit",
+	fillShip = "Fill Ship",
 	giftreset = "Gift reset",
 	gifts = "Gifts",
 	give = "Resource grant",
@@ -1803,6 +1805,64 @@ function AdminPermissions.ApplyAdminConsoleAction(requestingPlayer: Player?, pay
 		return AdminPermissions.SetStaffRole(requestingPlayer, target, "SuperAdmin", false, "AdminConsoleActionRequest", confirmed)
 	elseif actionName == "Kick" then
 		return AdminPermissions.KickPlayer(requestingPlayer, target, payload.Reason, "AdminConsoleActionRequest", confirmed)
+	elseif actionName == "FillShip" then
+		AdminPermissions.LogCommandAttempt(requestingPlayer, "fillShip", "AdminConsoleActionRequest", string.format(
+			"target=%s targetMode=%s fillMode=%s crew=%s rarity=%s variant=%s confirmed=%s",
+			tostring(target),
+			tostring(payload.TargetMode),
+			tostring(payload.FillMode),
+			tostring(payload.CrewMember or payload.CrewMemberId or payload.Crew),
+			tostring(payload.Rarity),
+			tostring(payload.Variant),
+			tostring(confirmed)
+		))
+		if tostring(payload.FillMode or payload.Mode or ""):lower():find("replace") and confirmed ~= true then
+			recordAdminAudit(requestingPlayer, "FillShip", nil, "rejected", "confirmation_required")
+			return {
+				Success = false,
+				Message = "Confirmation required before replacing ship slots.",
+			}
+		end
+
+		local result = AdminFillShipService.Run(requestingPlayer, payload)
+		local resultTargetUserId = tonumber(result and result.TargetUserId) or tonumber(target)
+		local detail = string.format(
+			"targetUserId=%s plotUpgrade=%s effectiveLevel=%s activeShipModel=%s fillMode=%s crew=%s rarity=%s variant=%s filled=%s replaced=%s skipped=%s failures=%s refreshOk=%s",
+			tostring(resultTargetUserId or ""),
+			tostring(result and result.PlotUpgrade or ""),
+			tostring(result and result.EffectiveLevel or ""),
+			tostring(result and result.ActiveShipModelName or ""),
+			tostring(result and result.FillMode or payload.FillMode or ""),
+			tostring(result and result.CrewSelection or payload.CrewMember or payload.CrewMemberId or payload.Crew or ""),
+			tostring(result and result.RaritySelection or payload.Rarity or ""),
+			tostring(result and result.VariantSelection or payload.Variant or ""),
+			tostring(result and result.SlotsFilled or 0),
+			tostring(result and result.SlotsReplaced or 0),
+			tostring(result and result.SlotsSkipped or 0),
+			tostring(result and typeof(result.Failures) == "table" and #result.Failures or 0),
+			tostring(result and result.RefreshOk)
+		)
+
+		if result and result.Success ~= false then
+			AdminPermissions.LogCommandExecuted(requestingPlayer, "fillShip", "AdminConsoleActionRequest", detail)
+			recordAdminAudit(
+				requestingPlayer,
+				"FillShip",
+				resultTargetUserId,
+				if result.Partial == true then "partial_success" else "success",
+				detail
+			)
+		else
+			AdminPermissions.LogCommandFailed(
+				requestingPlayer,
+				"fillShip",
+				"AdminConsoleActionRequest",
+				"reason=" .. tostring(result and result.Reason or "unknown") .. " " .. detail
+			)
+			recordAdminAudit(requestingPlayer, "FillShip", resultTargetUserId, "failed", tostring(result and result.Reason or "unknown"))
+		end
+
+		return result
 	end
 
 	recordAdminAudit(requestingPlayer, "AdminConsole", nil, "rejected", "unsupported_action")

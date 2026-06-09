@@ -5,6 +5,8 @@ function Module.Install(ctx)
 	local CollectionService = ctx.CollectionService
 	local CrewOverhead = ctx.CrewOverhead
 	local CrewCatalog = ctx.CrewCatalog
+	local CrewIncomeBalance = ctx.CrewIncomeBalance
+	local CrewInstanceService = ctx.CrewInstanceService
 	local CrewProtectionService = ctx.CrewProtectionService
 	local PlacedCrewState = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("PlacedCrewState"))
 	local function findCrewMemberInfoByName(...)
@@ -65,6 +67,51 @@ function Module.Install(ctx)
 		end
 	end
 
+	local function getInstanceDataReadOnly(player, instanceId)
+		instanceId = tostring(instanceId or "")
+		if
+			instanceId == ""
+			or CrewInstanceService == nil
+			or typeof(CrewInstanceService.GetInstanceReadOnly) ~= "function"
+		then
+			return nil
+		end
+
+		local _, instanceData = CrewInstanceService.GetInstanceReadOnly(player, instanceId)
+		if typeof(instanceData) == "table" then
+			return instanceData
+		end
+		return nil
+	end
+
+	local function resolveSavedRarityVariant(instanceData, fallbackRarity, fallbackVariant)
+		local rarity = tostring(fallbackRarity or "")
+		local variant = tostring(fallbackVariant or "Normal")
+		if typeof(instanceData) == "table" then
+			local savedRarity = tostring(instanceData.Rarity or "")
+			if savedRarity ~= "" then
+				rarity = if CrewIncomeBalance and typeof(CrewIncomeBalance.NormalizeRarity) == "function"
+					then CrewIncomeBalance.NormalizeRarity(savedRarity)
+					else savedRarity
+			end
+
+			local savedVariant = tostring(instanceData.Variant or "")
+			if savedVariant ~= "" then
+				variant = if CrewIncomeBalance and typeof(CrewIncomeBalance.NormalizeVariant) == "function"
+					then CrewIncomeBalance.NormalizeVariant(savedVariant)
+					else savedVariant
+			end
+		end
+
+		if rarity == "" then
+			rarity = "Common"
+		end
+		if variant == "" then
+			variant = "Normal"
+		end
+		return rarity, variant
+	end
+
 	local function syncPlacedOverheadMetadata(player, standModel, crewMemberName, placedModel)
 		if typeof(placedModel) ~= "Instance" then
 			return
@@ -118,6 +165,8 @@ function Module.Install(ctx)
 			else isStandIncomeBoosted(player, standModel.Name, canonicalName)
 		local slotState = if isCaptainSlot then nil else getStandSlotState(player, standModel.Name)
 		local slotBonusInfo = slotState and slotState.BonusInfo or nil
+		local instanceData = getInstanceDataReadOnly(player, crewMemberInstanceId)
+		displayRarity, variantKey = resolveSavedRarityVariant(instanceData, displayRarity, variantKey)
 
 		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Kind, CrewOverhead.Kind.Placed)
 		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.DisplayName, displayName)
@@ -240,6 +289,14 @@ function Module.Install(ctx)
 		end
 		local slotState = if isCaptainSlot then nil else getStandSlotState(player, standName)
 		local slotBonusInfo = slotState and slotState.BonusInfo or nil
+		local instanceData = getInstanceDataReadOnly(player, crewMemberInstanceId)
+		local displayRarity = if tostring(info and info.Rarity or "") ~= "" then tostring(info.Rarity) else "Common"
+		displayRarity, variantKey = resolveSavedRarityVariant(instanceData, displayRarity, variantKey)
+		local stateBaseName = tostring(
+			typeof(instanceData) == "table" and tostring(instanceData.BaseName or "") ~= "" and instanceData.BaseName
+				or resolved and resolved.BaseName
+				or canonicalName
+		)
 		local incomePerSecond = if isCaptainSlot
 			then CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
 			else getStandIncomePerSecond(player, standName, canonicalName)
@@ -285,10 +342,10 @@ function Module.Install(ctx)
 				[PlacedCrewState.Attribute.IsCaptain] = isCaptainSlot,
 				[PlacedCrewState.Attribute.CrewMemberName] = tostring(crewMemberName or ""),
 				[PlacedCrewState.Attribute.CanonicalName] = canonicalName,
-				[PlacedCrewState.Attribute.BaseName] = tostring(resolved and resolved.BaseName or canonicalName),
+				[PlacedCrewState.Attribute.BaseName] = stateBaseName,
 				[PlacedCrewState.Attribute.CrewMemberInstanceId] = if crewMemberInstanceId ~= "" then crewMemberInstanceId else nil,
 				[PlacedCrewState.Attribute.DisplayName] = displayName,
-				[PlacedCrewState.Attribute.Rarity] = if tostring(info and info.Rarity or "") ~= "" then tostring(info.Rarity) else "Common",
+				[PlacedCrewState.Attribute.Rarity] = displayRarity,
 				[PlacedCrewState.Attribute.Variant] = variantKey,
 				[PlacedCrewState.Attribute.IncomePerSecond] = math.max(0, incomePerSecond),
 				[PlacedCrewState.Attribute.RawIncomePerSecond] = math.max(0, rawIncomePerSecond),
@@ -308,7 +365,7 @@ function Module.Install(ctx)
 			Overhead = {
 				[OVERHEAD_ATTRIBUTES.Kind] = CrewOverhead.Kind.Placed,
 				[OVERHEAD_ATTRIBUTES.DisplayName] = displayName,
-				[OVERHEAD_ATTRIBUTES.Rarity] = if tostring(info and info.Rarity or "") ~= "" then tostring(info.Rarity) else "Common",
+				[OVERHEAD_ATTRIBUTES.Rarity] = displayRarity,
 				[OVERHEAD_ATTRIBUTES.Variant] = variantKey,
 				[OVERHEAD_ATTRIBUTES.IncomePerSecond] = math.max(0, incomePerSecond),
 				[OVERHEAD_ATTRIBUTES.BeliBoosted] = if isCaptainSlot

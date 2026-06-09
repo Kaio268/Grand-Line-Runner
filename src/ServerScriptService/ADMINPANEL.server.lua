@@ -71,6 +71,7 @@ local ADMIN_CONSOLE_ACTIONS = {
 	SetSuperAdmin = true,
 	RemoveSuperAdmin = true,
 	Kick = true,
+	FillShip = true,
 }
 
 local function fireAdminRosterUpdated(reason)

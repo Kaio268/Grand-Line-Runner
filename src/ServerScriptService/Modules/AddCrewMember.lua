@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local CrewRegistry = require(Modules:WaitForChild("Crew"):WaitForChild("CrewRegistry"))
 local CrewInstanceService = require(script.Parent:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
@@ -36,7 +37,7 @@ local function rejectGrant(plr, reason, detail)
 	return false, tostring(reason or "unknown")
 end
 
-function Module:AddCrewMember(plr, crewMemberName, amount, options)
+local function buildGrantDescriptor(plr, crewMemberName, amount, options)
 	if typeof(plr) ~= "Instance" or not plr:IsA("Player") then
 		return rejectGrant(plr, "invalid_player")
 	end
@@ -55,7 +56,12 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 	n = math.floor(n)
 	if n <= 0 then
 		if n == 0 then
-			return true
+			return true, {
+				NoOp = true,
+				Amount = 0,
+				CrewMemberName = crewMemberName,
+				RequestedCrewMemberName = requestedCrewMemberName,
+			}
 		end
 		return rejectGrant(plr, "non_positive_amount", "amount=" .. tostring(amount))
 	end
@@ -117,8 +123,97 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
 	local bypassQuickSlotCapacity = options.TutorialReward == true or options._QuickSlotCapacityReserved == true
 	local cleanDisplayName = tostring(displayInfo.DisplayName or info.DisplayName or info.CrewMemberName or info.Name or crewMemberName)
+	local grantRarity = tostring(info.Rarity or "Common")
+	local grantIncome = tonumber(info.Income) or 0
+	local grantBaseIncomeRoll = nil
+	local grantIncomeRollVersion = nil
+	local rarityOverride = tostring(options.RarityOverride or "")
+	if rarityOverride ~= "" then
+		grantRarity = CrewIncomeBalance.NormalizeRarity(rarityOverride)
+		grantBaseIncomeRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(grantRarity)
+		grantIncomeRollVersion = CrewIncomeBalance.GetIncomeRollVersion()
+		grantIncome = CrewIncomeBalance.ComputeIncome(grantBaseIncomeRoll, variantKey, 1, grantRarity)
+	end
 
-	if not bypassQuickSlotCapacity then
+	local metadata = {
+		StorageName = crewMemberName,
+		LegacyStorageName = legacyStorageName,
+		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
+		DisplayName = cleanDisplayName,
+		ModelName = tostring(info.ModelName or baseName),
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = grantRarity,
+		BaseIncomeRoll = grantBaseIncomeRoll,
+		IncomeRollVersion = grantIncomeRollVersion,
+		Income = grantIncome,
+		Render = render,
+		GoldenRender = goldenRender,
+		DiamondRender = diamondRender,
+	}
+	local instanceOverrides = {
+		StorageName = crewMemberName,
+		LegacyStorageName = legacyStorageName,
+		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
+		DisplayName = cleanDisplayName,
+		ModelName = tostring(info.ModelName or baseName),
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = grantRarity,
+		BaseIncomeRoll = grantBaseIncomeRoll,
+		IncomeRollVersion = grantIncomeRollVersion,
+		Income = grantIncome,
+		Render = render,
+		GoldenRender = goldenRender,
+		DiamondRender = diamondRender,
+		Level = 1,
+		CurrentXP = 0,
+		TotalXP = math.max(0, math.floor(tonumber(options.TotalXP) or 0)),
+		Source = tostring(options.Source or ""),
+		DepthBand = tostring(options.DepthBand or ""),
+		TutorialReward = options.TutorialReward == true,
+		TutorialToken = tostring(options.TutorialToken or ""),
+		GrandLineRushStarter = options.GrandLineRushStarter == true,
+		_QuickSlotCapacityReserved = true,
+	}
+
+	return true, {
+		RequestedCrewMemberName = requestedCrewMemberName,
+		CrewMemberName = crewMemberName,
+		Amount = n,
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = grantRarity,
+		Income = grantIncome,
+		LegacyStorageName = legacyStorageName,
+		DisplayName = cleanDisplayName,
+		BypassQuickSlotCapacity = bypassQuickSlotCapacity,
+		Metadata = metadata,
+		InstanceOverrides = instanceOverrides,
+		Source = tostring(options.Source or ""),
+		DepthBand = tostring(options.DepthBand or ""),
+	}
+end
+
+function Module.BuildGrantDescriptor(plr, crewMemberName, amount, options)
+	return buildGrantDescriptor(plr, crewMemberName, amount, options)
+end
+
+function Module:AddCrewMember(plr, crewMemberName, amount, options)
+	options = if typeof(options) == "table" then options else {}
+	local descriptorOk, descriptorOrReason = buildGrantDescriptor(plr, crewMemberName, amount, options)
+	if descriptorOk ~= true then
+		return false, descriptorOrReason
+	end
+
+	local descriptor = descriptorOrReason
+	if descriptor.NoOp == true then
+		return true
+	end
+	local n = descriptor.Amount
+	crewMemberName = descriptor.CrewMemberName
+
+	if not descriptor.BypassQuickSlotCapacity then
 		local canGain, _, _, _, capacityReason = CrewQuickSlotService.CanGainOrNotify(plr, crewMemberName, n, "AddCrewMember:" .. crewMemberName)
 		if not canGain then
 			return false, tostring(capacityReason or "crew_stack_capacity_full")
@@ -135,47 +230,12 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		end
 	end
 
-	CrewInstanceService.EnsureInventoryMetadata(plr, crewMemberName, {
-		StorageName = crewMemberName,
-		LegacyStorageName = legacyStorageName,
-		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
-		DisplayName = cleanDisplayName,
-		ModelName = tostring(info.ModelName or baseName),
-		BaseName = baseName,
-		Variant = variantKey,
-		Rarity = tostring(info.Rarity or "Common"),
-		Income = tonumber(info.Income) or 0,
-		Render = render,
-		GoldenRender = goldenRender,
-		DiamondRender = diamondRender,
-	})
-	local createdIds, createReason = CrewInstanceService.CreateInstances(plr, crewMemberName, n, {
-		StorageName = crewMemberName,
-		LegacyStorageName = legacyStorageName,
-		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
-		DisplayName = cleanDisplayName,
-		ModelName = tostring(info.ModelName or baseName),
-		BaseName = baseName,
-		Variant = variantKey,
-		Rarity = tostring(info.Rarity or "Common"),
-		Income = tonumber(info.Income) or 0,
-		Render = render,
-		GoldenRender = goldenRender,
-		DiamondRender = diamondRender,
-		Level = 1,
-		CurrentXP = 0,
-		TotalXP = math.max(0, math.floor(tonumber(options.TotalXP) or 0)),
-		Source = tostring(options.Source or ""),
-		DepthBand = tostring(options.DepthBand or ""),
-		TutorialReward = options.TutorialReward == true,
-		TutorialToken = tostring(options.TutorialToken or ""),
-		GrandLineRushStarter = options.GrandLineRushStarter == true,
-		_QuickSlotCapacityReserved = true,
-	})
+	CrewInstanceService.EnsureInventoryMetadata(plr, crewMemberName, descriptor.Metadata)
+	local createdIds, createReason = CrewInstanceService.CreateInstances(plr, crewMemberName, n, descriptor.InstanceOverrides)
 	if #createdIds ~= n then
 		return rejectGrant(plr, tostring(createReason or "crew_instance_create_count_mismatch"), string.format(
 			"requested=%s canonical=%s expected=%d created=%d",
-			tostring(requestedCrewMemberName),
+			tostring(descriptor.RequestedCrewMemberName),
 			tostring(crewMemberName),
 			n,
 			#createdIds
@@ -185,9 +245,9 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 	TitleProgressService.RecordCrewGained(plr, {
 		CrewName = crewMemberName,
 		Amount = n,
-		Rarity = tostring(info.Rarity or "Common"),
-		Source = tostring(options.Source or ""),
-		DepthBand = tostring(options.DepthBand or ""),
+		Rarity = descriptor.Rarity,
+		Source = descriptor.Source,
+		DepthBand = descriptor.DepthBand,
 	})
 
 	return true, createdIds

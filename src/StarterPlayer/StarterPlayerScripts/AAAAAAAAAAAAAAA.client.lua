@@ -1218,6 +1218,7 @@ local SHARED_WAVE_NEAR_SMOOTH_DISTANCE = 520
 local SHARED_WAVE_FAR_SMOOTH_DISTANCE = 950
 local SHARED_WAVE_FAR_UPDATE_INTERVAL = 0.12
 local SHARED_WAVE_DISTANT_UPDATE_INTERVAL = 0.35
+local SHARED_WAVE_LOD_CLASSIFICATION_INTERVAL = 0.1
 local WAVE_SOUND_VOLUME = 0.7
 local WAVE_SOUND_ROLLOFF_MIN_DISTANCE = 45
 local WAVE_SOUND_ROLLOFF_MAX_DISTANCE = 450
@@ -1231,6 +1232,7 @@ local waveClientDiagnostics = {
 	UpdateTimeSum = 0,
 	UpdateTimeSamples = 0,
 	LastPublishedAt = 0,
+	LastClassifiedSmoothers = 0,
 	LastUpdatedSmoothers = 0,
 	LastSkippedSmoothers = 0,
 }
@@ -2049,25 +2051,47 @@ local function getSmootherPosition(controller)
 	return nil
 end
 
-local function shouldUpdateSmootherThisFrame(controller, deltaTime, focusPosition)
+local function getCachedSmootherUpdateInterval(controller, focusPosition, now)
 	if not focusPosition then
-		return true, deltaTime
+		return 0, true
+	end
+
+	local lastClassifiedAt = tonumber(controller.LodClassifiedAt) or 0
+	local cachedInterval = controller.LodUpdateInterval
+	if cachedInterval ~= nil and now - lastClassifiedAt < SHARED_WAVE_LOD_CLASSIFICATION_INTERVAL then
+		return cachedInterval, false
 	end
 
 	local position = getSmootherPosition(controller)
 	if not position then
-		return true, deltaTime
+		controller.LodUpdateInterval = 0
+		controller.LodClassifiedAt = now
+		return 0, true
 	end
 
 	local distance = (position - focusPosition).Magnitude
 	if distance <= SHARED_WAVE_NEAR_SMOOTH_DISTANCE then
+		controller.LodUpdateInterval = 0
+	elseif distance <= SHARED_WAVE_FAR_SMOOTH_DISTANCE then
+		controller.LodUpdateInterval = SHARED_WAVE_FAR_UPDATE_INTERVAL
+	else
+		controller.LodUpdateInterval = SHARED_WAVE_DISTANT_UPDATE_INTERVAL
+	end
+
+	controller.LodClassifiedAt = now
+	return controller.LodUpdateInterval, true
+end
+
+local function shouldUpdateSmootherThisFrame(controller, deltaTime, focusPosition, now)
+	local interval, classified = getCachedSmootherUpdateInterval(controller, focusPosition, now)
+	if classified then
+		waveClientDiagnostics.LastClassifiedSmoothers += 1
+	end
+	if interval <= 0 then
 		controller.LodAccumulatedDelta = 0
 		return true, deltaTime
 	end
 
-	local interval = if distance <= SHARED_WAVE_FAR_SMOOTH_DISTANCE
-		then SHARED_WAVE_FAR_UPDATE_INTERVAL
-		else SHARED_WAVE_DISTANT_UPDATE_INTERVAL
 	controller.LodAccumulatedDelta = (tonumber(controller.LodAccumulatedDelta) or 0) + deltaTime
 	if controller.LodAccumulatedDelta < interval then
 		return false, 0
@@ -2080,15 +2104,17 @@ end
 
 local function updateSharedHazardVisualSmoothers(deltaTime)
 	local updateStartedAt = os.clock()
+	local now = updateStartedAt
 	local focusPosition = getSharedWaveFocusPosition()
 	local updated = 0
 	local skipped = 0
+	waveClientDiagnostics.LastClassifiedSmoothers = 0
 	for _, controller in pairs(sharedHazardVisualSmoothers) do
 		if controller.Destroyed ~= true and controller.Hazard and not controller.Hazard.Parent then
 			controller:Update(deltaTime)
 			updated += 1
 		else
-			local shouldUpdate, updateDelta = shouldUpdateSmootherThisFrame(controller, deltaTime, focusPosition)
+			local shouldUpdate, updateDelta = shouldUpdateSmootherThisFrame(controller, deltaTime, focusPosition, now)
 			if shouldUpdate then
 				controller:Update(updateDelta)
 				updated += 1

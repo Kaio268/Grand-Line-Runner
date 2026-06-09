@@ -229,7 +229,11 @@ function Module.Install(ctx)
 	end
 
 
-	CrewInstanceService.RegisterCrewInventorySavedCallback(function(player)
+	CrewInstanceService.RegisterCrewInventorySavedCallback(function(player, _crewInventory, metadata)
+		if typeof(metadata) == "table" and metadata.SkipStandRuntimeRefresh == true then
+			return
+		end
+
 		if player and player.Parent == Players then
 			if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
 				return
