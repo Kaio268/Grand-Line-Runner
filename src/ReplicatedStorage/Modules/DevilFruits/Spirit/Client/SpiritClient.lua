@@ -78,6 +78,54 @@ local SOUND_AUDIO_KEY_BY_NAME = {
 	[SOUND_RETURN] = "ReturnSoundId",
 }
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local HORO_GHOST_VFX_FRUIT_FOLDER_NAME = "Horo"
+local HORO_GHOST_VFX_TEMPLATE_NAME = "R6"
+local HORO_GHOST_VFX_CLONE_NAME = "HoroGhostProjectionAuthoredVfx"
+local HORO_GHOST_VFX_FOLDER_NAME = "HoroGhostProjectionClientVfx"
+local HORO_GHOST_VISIBLE_VFX_PART_ATTRIBUTE = "VisibleVfxPart"
+local HORO_GHOST_PERSISTENT_EMITTER_ATTRIBUTE = "HoroPersistentProjectionEmitter"
+local HORO_GHOST_PERSISTENT_EMITTER_FALLBACK_RATE = 18
+local HORO_GHOST_PERSISTENT_EMITTER_MIN_LIFETIME = 0.75
+local HORO_GHOST_PERSISTENT_EMITTER_NAMES = {
+	"Fading Tint",
+	"Ghostly Energy",
+	"Swirling Basic Energy",
+}
+local HORO_GHOST_PERSISTENT_EMITTER_PROFILE = {
+	["Fading Tint"] = {
+		Rate = 42,
+		Lifetime = NumberRange.new(1.25, 1.8),
+		Speed = NumberRange.new(0.2, 0.9),
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.38),
+			NumberSequenceKeypoint.new(0.72, 0.5),
+			NumberSequenceKeypoint.new(1, 0.88),
+		}),
+	},
+	["Ghostly Energy"] = {
+		Rate = 52,
+		Lifetime = NumberRange.new(1, 1.65),
+		Speed = NumberRange.new(0.25, 1.35),
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.28),
+			NumberSequenceKeypoint.new(0.7, 0.44),
+			NumberSequenceKeypoint.new(1, 0.86),
+		}),
+	},
+	["Swirling Basic Energy"] = {
+		Rate = 36,
+		Lifetime = NumberRange.new(1.15, 1.85),
+		Speed = NumberRange.new(0.3, 1.75),
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.32),
+			NumberSequenceKeypoint.new(0.72, 0.48),
+			NumberSequenceKeypoint.new(1, 0.9),
+		}),
+	},
+}
+local HORO_GHOST_VFX_ATTACH_TIMEOUT = 2
+local HORO_GHOST_VFX_END_GRACE_DURATION = 0.75
+local HORO_GHOST_VFX_WARNED = {}
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -532,6 +580,511 @@ local function findGhostModel(payload)
 		or nil
 end
 
+local function warnHoroGhostVfxOnce(key, message, ...)
+	if HORO_GHOST_VFX_WARNED[key] then
+		return
+	end
+	HORO_GHOST_VFX_WARNED[key] = true
+	warn(string.format("[HORO VFX] " .. tostring(message), ...))
+end
+
+local function getGhostProjectionVfxKey(projectionIdOrPayload)
+	if typeof(projectionIdOrPayload) == "string" and projectionIdOrPayload ~= "" then
+		return projectionIdOrPayload
+	end
+	if type(projectionIdOrPayload) ~= "table" then
+		return nil
+	end
+
+	local projectionId = projectionIdOrPayload.ProjectionId
+	if typeof(projectionId) == "string" and projectionId ~= "" then
+		return projectionId
+	end
+
+	local ghostName = projectionIdOrPayload.GhostName
+	if typeof(ghostName) == "string" and ghostName ~= "" then
+		return ghostName
+	end
+
+	return nil
+end
+
+local function getHoroGhostVfxTemplate()
+	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
+	local vfxFolder = assetsFolder and assetsFolder:FindFirstChild("VFX")
+	local horoFolder = vfxFolder and vfxFolder:FindFirstChild(HORO_GHOST_VFX_FRUIT_FOLDER_NAME)
+	local template = horoFolder and horoFolder:FindFirstChild(HORO_GHOST_VFX_TEMPLATE_NAME)
+
+	if not template then
+		warnHoroGhostVfxOnce("missing_template", "missing asset ReplicatedStorage.Assets.VFX.Horo.R6")
+		return nil
+	end
+	if not template:IsA("Model") then
+		warnHoroGhostVfxOnce(
+			"invalid_template",
+			"expected ReplicatedStorage.Assets.VFX.Horo.R6 to be a Model, got %s",
+			template.ClassName
+		)
+		return nil
+	end
+
+	return template
+end
+
+local function getGhostsFolder()
+	local effectsFolder = Workspace:FindFirstChild(WORLD_EFFECTS_FOLDER_NAME)
+	return effectsFolder and effectsFolder:FindFirstChild(GHOSTS_FOLDER_NAME) or nil
+end
+
+local function getHoroGhostVfxFolder()
+	local folder = Workspace:FindFirstChild(HORO_GHOST_VFX_FOLDER_NAME)
+	if folder then
+		return folder
+	end
+
+	folder = Instance.new("Folder")
+	folder.Name = HORO_GHOST_VFX_FOLDER_NAME
+	folder.Parent = Workspace
+	return folder
+end
+
+local function findGhostProjectionModel(payload)
+	local projectionId = payload and payload.ProjectionId
+	local ghostName = payload and payload.GhostName
+	local deadline = os.clock() + HORO_GHOST_VFX_ATTACH_TIMEOUT
+
+	while os.clock() <= deadline do
+		local ghostsFolder = getGhostsFolder()
+		if ghostsFolder then
+			if typeof(projectionId) == "string" and projectionId ~= "" then
+				for _, child in ipairs(ghostsFolder:GetChildren()) do
+					if child:IsA("Model") and child:GetAttribute("ProjectionId") == projectionId then
+						return child
+					end
+				end
+			end
+
+			if typeof(ghostName) == "string" and ghostName ~= "" then
+				local namedGhost = ghostsFolder:FindFirstChild(ghostName)
+				if namedGhost and namedGhost:IsA("Model") then
+					return namedGhost
+				end
+			end
+		end
+
+		task.wait(GHOST_LOOKUP_POLL_INTERVAL)
+	end
+
+	return nil
+end
+
+local function getHoroGhostVfxRoot(vfxModel)
+	if not vfxModel then
+		return nil
+	end
+
+	local primaryPart = vfxModel.PrimaryPart
+	if primaryPart and primaryPart:IsA("BasePart") and primaryPart:IsDescendantOf(vfxModel) then
+		return primaryPart
+	end
+
+	local namedRoot = vfxModel:FindFirstChild("HumanoidRootPart", true)
+	if namedRoot and namedRoot:IsA("BasePart") then
+		return namedRoot
+	end
+
+	return vfxModel:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function shouldRenderHoroGhostVfxInstance(instance)
+	if instance:GetAttribute(HORO_GHOST_VISIBLE_VFX_PART_ATTRIBUTE) == true then
+		return true
+	end
+
+	local ancestor = instance.Parent
+	while ancestor do
+		if ancestor:IsA("BasePart") then
+			return ancestor:GetAttribute(HORO_GHOST_VISIBLE_VFX_PART_ATTRIBUTE) == true
+		end
+		ancestor = ancestor.Parent
+	end
+
+	return false
+end
+
+local function isHoroGhostVfxMovementInstance(instance)
+	return instance:IsA("Humanoid")
+		or instance:IsA("AnimationController")
+		or instance:IsA("Animator")
+		or instance:IsA("JointInstance")
+		or instance:IsA("Constraint")
+		or instance:IsA("WeldConstraint")
+		or instance:IsA("BodyMover")
+		or instance:IsA("VectorForce")
+		or instance:IsA("LinearVelocity")
+		or instance:IsA("AngularVelocity")
+		or instance:IsA("AlignPosition")
+		or instance:IsA("AlignOrientation")
+end
+
+local function sanitizeHoroGhostVfxClone(vfxModel)
+	for _, descendant in ipairs(vfxModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local shouldRenderPart = shouldRenderHoroGhostVfxInstance(descendant)
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+			descendant.Massless = true
+			descendant.CastShadow = false
+			if not shouldRenderPart then
+				descendant.Transparency = 1
+				descendant.LocalTransparencyModifier = 1
+			end
+		elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
+			if not shouldRenderHoroGhostVfxInstance(descendant) then
+				descendant.Transparency = 1
+			end
+		elseif descendant:IsA("BaseScript") or isHoroGhostVfxMovementInstance(descendant) then
+			descendant:Destroy()
+		end
+	end
+end
+
+local function getHoroPersistentEmitterAttachment(vfxModel)
+	local fxPart = vfxModel and vfxModel:FindFirstChild("FX")
+	if not fxPart then
+		return nil
+	end
+
+	return fxPart:FindFirstChild("Attachment") or fxPart:FindFirstChildOfClass("Attachment")
+end
+
+local function configureHoroPersistentGhostEmitters(vfxModel)
+	local attachment = getHoroPersistentEmitterAttachment(vfxModel)
+	if not attachment then
+		warnHoroGhostVfxOnce("missing_persistent_attachment", "missing Horo R6.FX.Attachment persistent emitters")
+		return
+	end
+
+	for _, emitterName in ipairs(HORO_GHOST_PERSISTENT_EMITTER_NAMES) do
+		local emitter = attachment:FindFirstChild(emitterName)
+		if not (emitter and emitter:IsA("ParticleEmitter")) then
+			warnHoroGhostVfxOnce(
+				"missing_persistent_emitter_" .. emitterName,
+				"missing Horo persistent ParticleEmitter %s under R6.FX.Attachment",
+				emitterName
+			)
+			continue
+		end
+
+		horoClientTrace(
+			"horoPersistentEmitter before name=%s enabled=%s rate=%s lifetime=%s speed=%s spread=%s transparency=%s timeScale=%s lockedToPart=%s drag=%s acceleration=%s zOffset=%s rotSpeed=%s emissionDirection=%s lightEmission=%s texture=%s emitCount=%s burstCount=%s persistent=%s continuous=%s",
+			emitter.Name,
+			tostring(emitter.Enabled),
+			tostring(emitter.Rate),
+			tostring(emitter.Lifetime),
+			tostring(emitter.Speed),
+			tostring(emitter.SpreadAngle),
+			tostring(emitter.Transparency),
+			tostring(emitter.TimeScale),
+			tostring(emitter.LockedToPart),
+			tostring(emitter.Drag),
+			tostring(emitter.Acceleration),
+			tostring(emitter.ZOffset),
+			tostring(emitter.RotSpeed),
+			tostring(emitter.EmissionDirection),
+			tostring(emitter.LightEmission),
+			tostring(emitter.Texture),
+			tostring(emitter:GetAttribute("EmitCount")),
+			tostring(emitter:GetAttribute("BurstCount")),
+			tostring(emitter:GetAttribute("Persistent")),
+			tostring(emitter:GetAttribute("Continuous"))
+		)
+
+		local profile = HORO_GHOST_PERSISTENT_EMITTER_PROFILE[emitterName]
+		emitter:SetAttribute(HORO_GHOST_PERSISTENT_EMITTER_ATTRIBUTE, true)
+		emitter.Enabled = true
+		emitter.Rate = math.max(emitter.Rate, profile and profile.Rate or HORO_GHOST_PERSISTENT_EMITTER_FALLBACK_RATE)
+		emitter.Lifetime = (profile and profile.Lifetime) or NumberRange.new(
+			HORO_GHOST_PERSISTENT_EMITTER_MIN_LIFETIME,
+			math.max(HORO_GHOST_PERSISTENT_EMITTER_MIN_LIFETIME, emitter.Lifetime.Max)
+		)
+		if profile and profile.Speed then
+			emitter.Speed = profile.Speed
+		end
+		if profile and profile.Transparency then
+			emitter.Transparency = profile.Transparency
+		end
+		emitter.LockedToPart = false
+		if emitter.TimeScale <= 0 then
+			emitter.TimeScale = 1
+		end
+
+		horoClientTrace(
+			"horoPersistentEmitter after name=%s enabled=%s rate=%s lifetime=%s speed=%s transparency=%s timeScale=%s lockedToPart=%s",
+			emitter.Name,
+			tostring(emitter.Enabled),
+			tostring(emitter.Rate),
+			tostring(emitter.Lifetime),
+			tostring(emitter.Speed),
+			tostring(emitter.Transparency),
+			tostring(emitter.TimeScale),
+			tostring(emitter.LockedToPart)
+		)
+	end
+end
+
+local function enableHoroGhostVfxVisuals(vfxModel)
+	for _, descendant in ipairs(vfxModel:GetDescendants()) do
+		if descendant:IsA("ParticleEmitter") then
+			descendant.Enabled = true
+			local emitCount = tonumber(descendant:GetAttribute("EmitCount"))
+				or tonumber(descendant:GetAttribute("BurstCount"))
+				or 0
+			local emitterRate = tonumber(descendant.Rate) or 0
+			local persistentEmitter = descendant:GetAttribute(HORO_GHOST_PERSISTENT_EMITTER_ATTRIBUTE) == true
+			if not persistentEmitter and emitterRate <= 0 and emitCount > 0 then
+				pcall(function()
+					descendant:Emit(emitCount)
+				end)
+			end
+		elseif descendant:IsA("Beam") or descendant:IsA("Trail") then
+			if descendant.Attachment0 and descendant.Attachment1 then
+				descendant.Enabled = true
+			end
+		elseif descendant:IsA("PointLight") or descendant:IsA("SpotLight") or descendant:IsA("SurfaceLight") then
+			descendant.Enabled = true
+		end
+	end
+end
+
+local function disableHoroGhostVfxVisuals(vfxModel)
+	for _, descendant in ipairs(vfxModel:GetDescendants()) do
+		if
+			descendant:IsA("ParticleEmitter")
+			or descendant:IsA("Beam")
+			or descendant:IsA("Trail")
+			or descendant:IsA("PointLight")
+			or descendant:IsA("SpotLight")
+			or descendant:IsA("SurfaceLight")
+		then
+			descendant.Enabled = false
+		end
+	end
+end
+
+local function disconnectHoroGhostVfxConnections(connections)
+	for _, connection in ipairs(connections or {}) do
+		if typeof(connection) == "RBXScriptConnection" then
+			connection:Disconnect()
+		end
+	end
+end
+
+local cleanupGhostProjectionVfx
+
+local function cleanupGhostProjectionVfxForPlayer(controller, player)
+	local states = controller and controller.ghostProjectionVfxByProjectionId
+	if not states or not player then
+		return
+	end
+
+	for projectionId, state in pairs(states) do
+		if state.TargetPlayer == player then
+			cleanupGhostProjectionVfx(controller, projectionId)
+		end
+	end
+end
+
+cleanupGhostProjectionVfx = function(controller, projectionIdOrPayload)
+	local states = controller and controller.ghostProjectionVfxByProjectionId
+	if not states then
+		return
+	end
+
+	local projectionId = getGhostProjectionVfxKey(projectionIdOrPayload)
+	if not projectionId then
+		return
+	end
+
+	local state = states[projectionId]
+	if not state then
+		return
+	end
+
+	states[projectionId] = nil
+	state.Destroyed = true
+	if typeof(state.TimeoutThread) == "thread" then
+		pcall(function()
+			task.cancel(state.TimeoutThread)
+		end)
+	end
+	disconnectHoroGhostVfxConnections(state.Connections)
+	if state.Clone and state.Clone.Parent then
+		disableHoroGhostVfxVisuals(state.Clone)
+		state.Clone:Destroy()
+	end
+end
+
+local function cleanupAllGhostProjectionVfx(controller)
+	local states = controller and controller.ghostProjectionVfxByProjectionId
+	if not states then
+		return
+	end
+
+	for projectionId in pairs(states) do
+		cleanupGhostProjectionVfx(controller, projectionId)
+	end
+end
+
+local function scheduleGhostProjectionVfxTimeout(controller, state, payload)
+	local endTime = tonumber(payload and payload.EndTime)
+	if not endTime then
+		return
+	end
+
+	local delaySeconds = endTime - Workspace:GetServerTimeNow() + HORO_GHOST_VFX_END_GRACE_DURATION
+	if delaySeconds <= 0 then
+		return
+	end
+
+	if typeof(state.TimeoutThread) == "thread" then
+		pcall(function()
+			task.cancel(state.TimeoutThread)
+		end)
+		state.TimeoutThread = nil
+	end
+
+	state.TimeoutThread = task.delay(delaySeconds, function()
+		local states = controller and controller.ghostProjectionVfxByProjectionId
+		if states and states[state.ProjectionId] == state and not state.Destroyed then
+			cleanupGhostProjectionVfx(controller, state.ProjectionId)
+		end
+	end)
+end
+
+local function attachGhostProjectionVfx(controller, payload, targetPlayer)
+	local states = controller and controller.ghostProjectionVfxByProjectionId
+	if not states then
+		return false
+	end
+
+	local projectionId = getGhostProjectionVfxKey(payload)
+	if not projectionId then
+		warnHoroGhostVfxOnce("missing_projection_id", "cannot attach ghost projection VFX without ProjectionId")
+		return false
+	end
+
+	local existingState = states[projectionId]
+	if existingState and not existingState.Destroyed then
+		existingState.TargetPlayer = targetPlayer
+		scheduleGhostProjectionVfxTimeout(controller, existingState, payload)
+		return true
+	end
+
+	local state = {
+		ProjectionId = projectionId,
+		TargetPlayer = targetPlayer,
+		Connections = {},
+		Destroyed = false,
+		Attaching = true,
+		Attached = false,
+	}
+	states[projectionId] = state
+
+	task.spawn(function()
+		local ghostModel = findGhostProjectionModel(payload)
+		if state.Destroyed or states[projectionId] ~= state then
+			return
+		end
+		if not ghostModel then
+			warnHoroGhostVfxOnce(
+				"missing_ghost_" .. projectionId,
+				"could not find replicated ghost for projectionId=%s",
+				tostring(projectionId)
+			)
+			cleanupGhostProjectionVfx(controller, projectionId)
+			return
+		end
+
+		local ghostRoot = getGhostRoot(ghostModel)
+		if not ghostRoot then
+			warnHoroGhostVfxOnce(
+				"missing_ghost_root_" .. projectionId,
+				"could not find ghost root for projectionId=%s",
+				tostring(projectionId)
+			)
+			cleanupGhostProjectionVfx(controller, projectionId)
+			return
+		end
+
+		local template = getHoroGhostVfxTemplate()
+		if not template then
+			cleanupGhostProjectionVfx(controller, projectionId)
+			return
+		end
+
+		local clone = template:Clone()
+		clone.Name = HORO_GHOST_VFX_CLONE_NAME
+		sanitizeHoroGhostVfxClone(clone)
+		configureHoroPersistentGhostEmitters(clone)
+
+		local vfxRoot = getHoroGhostVfxRoot(clone)
+		if not vfxRoot then
+			clone:Destroy()
+			warnHoroGhostVfxOnce(
+				"missing_vfx_root",
+				"could not find a BasePart root inside ReplicatedStorage.Assets.VFX.Horo.R6"
+			)
+			cleanupGhostProjectionVfx(controller, projectionId)
+			return
+		end
+
+		clone.PrimaryPart = vfxRoot
+		clone:PivotTo(ghostRoot.CFrame)
+		clone.Parent = getHoroGhostVfxFolder()
+
+		state.Clone = clone
+		state.GhostModel = ghostModel
+		state.GhostRoot = ghostRoot
+		state.Attaching = false
+		state.Attached = true
+		state.Connections[#state.Connections + 1] = RunService.RenderStepped:Connect(function()
+			if state.Destroyed then
+				return
+			end
+			if not clone.Parent or not ghostRoot.Parent then
+				cleanupGhostProjectionVfx(controller, projectionId)
+				return
+			end
+
+			clone:PivotTo(ghostRoot.CFrame)
+		end)
+		state.Connections[#state.Connections + 1] = ghostModel.AncestryChanged:Connect(function(_, parent)
+			if parent == nil then
+				cleanupGhostProjectionVfx(controller, projectionId)
+			end
+		end)
+		state.Connections[#state.Connections + 1] = ghostRoot.AncestryChanged:Connect(function(_, parent)
+			if parent == nil then
+				cleanupGhostProjectionVfx(controller, projectionId)
+			end
+		end)
+
+		enableHoroGhostVfxVisuals(clone)
+		scheduleGhostProjectionVfxTimeout(controller, state, payload)
+		horoClientTrace(
+			"attached authored ghost vfx projectionId=%s ghost=%s clone=%s",
+			tostring(projectionId),
+			formatInstancePath(ghostModel),
+			formatInstancePath(clone)
+		)
+	end)
+
+	return true
+end
+
 local function findProjectionBody(payload)
 	local projectionId = payload and payload.ProjectionId
 	if typeof(projectionId) ~= "string" or projectionId == "" then
@@ -780,6 +1333,7 @@ function SpiritClient.Create(config)
 	local self = setmetatable({}, SpiritClient)
 	self.player = config.player or Players.LocalPlayer
 	self.activeState = nil
+	self.ghostProjectionVfxByProjectionId = {}
 	return self
 end
 
@@ -1017,6 +1571,7 @@ function SpiritClient:StopLocalProjection(_payload, keepServerGhost)
 	)
 
 	self.activeState = nil
+	cleanupGhostProjectionVfx(self, state.ProjectionId)
 	stopProjectionMoveLoop(state)
 	if shouldPlayReturnSound(_payload) then
 		local returnParent = getProjectionReturnSoundParent(self.player, state)
@@ -1355,22 +1910,38 @@ function SpiritClient:HandleEffect(targetPlayer, abilityName, payload)
 		getPlayerCarrySummary(self.player)
 	)
 	if targetPlayer ~= self.player then
-		return phase == "Start"
-			or phase == "Resolve"
-			or phase == "Interrupted"
-			or phase == "Rejected"
-			or phase == "Ignored"
+		if phase == "Start" then
+			attachGhostProjectionVfx(self, payload, targetPlayer)
+			return true
+		elseif phase == "Resolve" or phase == "Interrupted" then
+			cleanupGhostProjectionVfx(self, payload)
+			return true
+		elseif phase == "Rejected" then
+			if payload and payload.ResolveReason == "already_active" then
+				return true
+			end
+			cleanupGhostProjectionVfx(self, payload)
+			return true
+		elseif phase == "Ignored" then
+			return true
+		end
+
+		return false
 	end
 
 	if phase == "Start" then
-		return self:StartLocalProjection(payload)
+		local started = self:StartLocalProjection(payload)
+		attachGhostProjectionVfx(self, payload, targetPlayer)
+		return started
 	elseif phase == "Resolve" or phase == "Interrupted" then
+		cleanupGhostProjectionVfx(self, payload)
 		self:StopLocalProjection(payload, false)
 		return true
 	elseif phase == "Rejected" then
-		if self.activeState and payload and payload.ResolveReason == "already_active" then
+		if payload and payload.ResolveReason == "already_active" then
 			return true
 		end
+		cleanupGhostProjectionVfx(self, payload)
 		self:StopLocalProjection(payload, false)
 		return true
 	elseif phase == "Ignored" then
@@ -1386,16 +1957,21 @@ end
 
 function SpiritClient:HandleUnequipped()
 	self:StopLocalProjection(nil, true)
+	cleanupAllGhostProjectionVfx(self)
 	return false
 end
 
 function SpiritClient:HandleCharacterRemoving()
 	self:StopLocalProjection(nil, true)
+	cleanupAllGhostProjectionVfx(self)
 end
 
 function SpiritClient:HandlePlayerRemoving(leavingPlayer)
 	if leavingPlayer == self.player then
 		self:StopLocalProjection(nil, true)
+		cleanupAllGhostProjectionVfx(self)
+	else
+		cleanupGhostProjectionVfxForPlayer(self, leavingPlayer)
 	end
 end
 
