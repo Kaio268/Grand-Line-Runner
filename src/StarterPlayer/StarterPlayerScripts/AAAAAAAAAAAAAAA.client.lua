@@ -2113,6 +2113,11 @@ local function updateSharedHazardVisualSmoothers(deltaTime)
 		if controller.Destroyed ~= true and controller.Hazard and not controller.Hazard.Parent then
 			controller:Update(deltaTime)
 			updated += 1
+		elseif controller:IsTimelineProxy() then
+			-- Timeline waves are cheap to evaluate locally and need render-rate updates.
+			-- Distance throttling makes fast waves advance in large visible steps.
+			controller:Update(deltaTime)
+			updated += 1
 		else
 			local shouldUpdate, updateDelta = shouldUpdateSmootherThisFrame(controller, deltaTime, focusPosition, now)
 			if shouldUpdate then
