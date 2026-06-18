@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
+local Economy = require(Configs:WaitForChild("GrandLineRushEconomy"))
 
 local Rebirths = {
 	ShipIncomeMultiplierMilestones = {
@@ -115,7 +116,7 @@ function Rebirths.GetBeliCostForRebirth(targetRebirthCount)
 		* (target ^ Rebirths.BeliCostExponent)
 		* (Rebirths.BeliCostGrowth ^ (target - 1))
 
-	return roundToNearest(rawCost, Rebirths.BeliCostRoundTo)
+	return Economy.ScaleAmount(roundToNearest(rawCost, Rebirths.BeliCostRoundTo))
 end
 
 function Rebirths.GetHighestShipLevelForRebirthCount(rebirthCount)

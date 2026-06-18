@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local verticalSliceConfig = Economy.VerticalSlice
 if verticalSliceConfig.Enabled ~= true then
@@ -332,6 +333,14 @@ local function setButtonEnabled(button, enabled)
 	button.BackgroundTransparency = enabled and 0 or 0.35
 end
 
+local function formatCount(value)
+	return CurrencyUtil.formatCompactNumber(tonumber(value) or 0)
+end
+
+local function formatBeliRatePerHour(value)
+	return CurrencyUtil.formatCompactNumber(tonumber(value) or 0) .. " Beli/hr"
+end
+
 local function getSelectedCrew()
 	if not currentState or not currentState.Crews then
 		return nil
@@ -359,7 +368,7 @@ local function render()
 		"Run Active: %s\nDepth: %s\nBeli: %s",
 		runState.InRun and "Yes" or "No",
 		tostring(runState.DepthBand or selectedDepthBand),
-		tostring(currentState.Beli or currentState.Doubloons or 0)
+		CurrencyUtil.formatCurrency(currentState.Beli or currentState.Doubloons or 0)
 	)
 	rewardStatusLabel.Text = string.format("Spawned: %s    |    Carrying: %s", spawnedText, carriedText)
 	setMessage(runState.ResolutionText or lastMessage)
@@ -382,10 +391,14 @@ local function render()
 	local materials = currentState.Materials or {}
 	local resourceParts = {}
 	for _, foodKey in ipairs(foodOrder) do
-		resourceParts[#resourceParts + 1] = string.format("%s x%d", Economy.Food[foodKey].DisplayName, tonumber(foodInventory[foodKey]) or 0)
+		resourceParts[#resourceParts + 1] = string.format(
+			"%s x%s",
+			Economy.Food[foodKey].DisplayName,
+			formatCount(foodInventory[foodKey])
+		)
 	end
-	resourceParts[#resourceParts + 1] = string.format("Common Mats x%d", tonumber(materials.CommonShipMaterial) or 0)
-	resourceParts[#resourceParts + 1] = string.format("Rare Mats x%d", tonumber(materials.RareShipMaterial) or 0)
+	resourceParts[#resourceParts + 1] = string.format("Common Mats x%s", formatCount(materials.CommonShipMaterial))
+	resourceParts[#resourceParts + 1] = string.format("Rare Mats x%s", formatCount(materials.RareShipMaterial))
 	resourceParts[#resourceParts + 1] = string.format("Devil Fruits x%d", tonumber(currentState.DevilFruitCount) or 0)
 	resourcesLabel.Text = table.concat(resourceParts, "   |   ")
 
@@ -410,13 +423,13 @@ local function render()
 
 	if selectedCrew then
 		selectedCrewLabel.Text = string.format(
-			"Selected Crew: %s | %s | Lv.%d | XP %d/%d | %d Beli/hr",
+			"Selected Crew: %s | %s | Lv.%d | XP %d/%d | %s",
 			selectedCrew.Name,
 			selectedCrew.Rarity,
 			selectedCrew.Level,
 			selectedCrew.CurrentXP,
 			selectedCrew.NextLevelXP,
-			selectedCrew.ShipIncomePerHour
+			formatBeliRatePerHour(selectedCrew.ShipIncomePerHour)
 		)
 		selectedCrewLabel.TextColor3 = rarityColors[selectedCrew.Rarity] or Color3.new(1, 1, 1)
 	else
@@ -427,7 +440,7 @@ local function render()
 	for _, foodKey in ipairs(foodOrder) do
 		local count = tonumber(foodInventory[foodKey]) or 0
 		local button = feedButtons[foodKey]
-		button.Text = string.format("%s x%d", Economy.Food[foodKey].DisplayName, count)
+		button.Text = string.format("%s x%s", Economy.Food[foodKey].DisplayName, formatCount(count))
 		setButtonEnabled(button, selectedCrew ~= nil and count > 0)
 	end
 
@@ -455,12 +468,12 @@ local function render()
 		local crewMeta = createLabel(
 			card,
 			string.format(
-				"%s | Lv.%d | XP %d/%d | %d Beli/hr",
+				"%s | Lv.%d | XP %d/%d | %s",
 				crew.Rarity,
 				crew.Level,
 				crew.CurrentXP,
 				crew.NextLevelXP,
-				crew.ShipIncomePerHour
+				formatBeliRatePerHour(crew.ShipIncomePerHour)
 			),
 			UDim2.new(1, -16, 0, 18),
 			UDim2.fromOffset(10, 32),

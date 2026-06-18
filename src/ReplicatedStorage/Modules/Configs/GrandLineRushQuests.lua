@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local DAY_SECONDS = 24 * 60 * 60
 local WEEK_SECONDS = 7 * DAY_SECONDS
@@ -70,6 +71,24 @@ local function registerQuest(questDefinition)
 
 	local storedDefinition = table.clone(questDefinition)
 	storedDefinition.Id = nil
+	if typeof(storedDefinition.Objective) == "table" then
+		local objective = table.clone(storedDefinition.Objective)
+		if tostring(objective.Type or "") == "EarnBeli" or tostring(objective.Type or "") == "EarnDoubloons" then
+			objective.Target = Economy.ScaleAmount(objective.Target)
+		end
+		storedDefinition.Objective = objective
+	end
+	if typeof(storedDefinition.Rewards) == "table" then
+		local rewards = {}
+		for index, reward in ipairs(storedDefinition.Rewards) do
+			local nextReward = if typeof(reward) == "table" then table.clone(reward) else reward
+			if typeof(nextReward) == "table" then
+				nextReward.Amount = Economy.ScaleRewardAmount(nextReward.Type, nextReward.Amount)
+			end
+			rewards[index] = nextReward
+		end
+		storedDefinition.Rewards = rewards
+	end
 	Quests.Definitions[questId] = storedDefinition
 	table.insert(Quests.ActiveQuestIds[categoryId], questId)
 end
@@ -80,22 +99,6 @@ for _, categoryId in ipairs(Quests.CategoryOrder) do
 	for _, questDefinition in ipairs(categoryDefinitions) do
 		registerQuest(questDefinition)
 	end
-end
-
-local function formatInteger(value)
-	local number = math.floor(tonumber(value) or 0)
-	local sign = if number < 0 then "-" else ""
-	local digits = tostring(math.abs(number))
-
-	while true do
-		local updated, count = digits:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
-		digits = updated
-		if count == 0 then
-			break
-		end
-	end
-
-	return sign .. digits
 end
 
 local function getFoodDisplayName(foodKey)
@@ -230,11 +233,11 @@ function Quests.FormatReward(reward)
 	local rewardType = tostring(reward.Type or "")
 
 	if rewardType == "Currency" then
-		return string.format("%s %s", formatInteger(amount), Economy.Currency.Primary.DisplayName)
+		return string.format("%s %s", CurrencyUtil.formatCompactNumber(amount), Economy.Currency.Primary.DisplayName)
 	elseif rewardType == "Food" then
-		return string.format("%dx %s", amount, getFoodDisplayName(tostring(reward.Key or "")))
+		return string.format("%sx %s", CurrencyUtil.formatCompactNumber(amount), getFoodDisplayName(tostring(reward.Key or "")))
 	elseif rewardType == "Material" then
-		return string.format("%dx %s", amount, getMaterialDisplayName(tostring(reward.Key or "")))
+		return string.format("%sx %s", CurrencyUtil.formatCompactNumber(amount), getMaterialDisplayName(tostring(reward.Key or "")))
 	elseif rewardType == "Chest" then
 		if reward.ChestKind == ChestRewards.ChestKinds.DevilFruit then
 			return string.format("%dx %s Devil Fruit Chest", amount, tostring(reward.FruitRarity or "Common"))

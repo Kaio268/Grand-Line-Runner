@@ -1695,7 +1695,8 @@ local function formatRewardDescription(cfg, previewContext): string
 			then CrewRewardPreview.ResolveDisplayName(rewardName, rewardData, previewContext)
 			else tostring(rewardName)
 
-		parts[#parts + 1] = string.format("x%s %s", tostring(amount), displayName)
+		local amountText = if typeof(amount) == "number" then Shorten.roundNumber(amount) else tostring(amount)
+		parts[#parts + 1] = string.format("x%s %s", amountText, displayName)
 	end
 	table.sort(parts)
 	return table.concat(parts, ", ")
@@ -3584,7 +3585,7 @@ local function formatClaimedRewardPopupText(rewardId, rewardName, amount)
 	local count = math.max(1, math.floor(tonumber(amount) or 1))
 
 	if normalizedName == "beli" or normalizedName == "money" or normalizedName == "doubloons" then
-		return tostring(count) .. " Beli"
+		return Shorten.roundNumber(count) .. " Beli"
 	elseif normalizedName == "x2moneytime" or normalizedName == "x15walkspeedtime" or normalizedName == "xlucktime" then
 		return tostring(cfg and cfg.RewName or name)
 	elseif name ~= "" then

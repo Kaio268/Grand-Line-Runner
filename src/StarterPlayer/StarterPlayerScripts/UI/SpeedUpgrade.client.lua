@@ -96,8 +96,10 @@ local hiddenStats = player:WaitForChild("HiddenLeaderstats")
 local speedValue = hiddenStats:WaitForChild("Speed")
 
 local upgradeKeys = {}
-for key in pairs(SpeedUpgrade) do
-	upgradeKeys[#upgradeKeys + 1] = key
+for key, config in pairs(SpeedUpgrade) do
+	if typeof(key) == "number" and typeof(config) == "table" then
+		upgradeKeys[#upgradeKeys + 1] = key
+	end
 end
 table.sort(upgradeKeys)
 
@@ -143,21 +145,6 @@ local function getProductPrice(productId)
 	return price
 end
 
-local function computeCost(config, currentSpeed)
-	local starterPrice = tonumber(config.Starter_Price) or 0
-	local priceMultiplier = tonumber(config.Price_Mult) or 1
-	local addSpeed = tonumber(config.AddSpeed) or 1
-	local speed = math.max(tonumber(currentSpeed) or 1, 1)
-	local currentLevel = math.max(speed - 1, 0)
-	local total = 0
-
-	for offset = 0, addSpeed - 1 do
-		total += starterPrice * (priceMultiplier ^ (currentLevel + offset))
-	end
-
-	return math.floor(total + 0.5)
-end
-
 local function showPurchaseUnavailable(productId, message)
 	warn(string.format(
 		"[SpeedUpgrade] Blocked speed product prompt productId=%s",
@@ -183,7 +170,7 @@ local function buildViewModel()
 		local addSpeed = tonumber(config.AddSpeed) or 0
 		local productId = tonumber(config.ProductID)
 		local canPromptRobux = MonetizationConfig.CanPromptDeveloperProduct(productId)
-		local cost = computeCost(config, currentSpeed)
+		local cost = SpeedUpgrade.ComputeCost(config, currentSpeed)
 		items[index] = {
 			key = tostring(key),
 			title = string.format("+%s Speed", Shorten.roundNumber(addSpeed)),

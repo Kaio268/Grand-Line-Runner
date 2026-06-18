@@ -1,4 +1,5 @@
 local ShipVisuals = require(script.Parent:WaitForChild("ShipVisuals"))
+local Economy = require(script.Parent:WaitForChild("GrandLineRushEconomy"))
 
 local Config = {
 	DisplayName = "Ship Upgrade",
@@ -134,9 +135,14 @@ function Config.GetRequirementForLevel(level)
 		return nil
 	end
 
+	local materials = table.clone(typeof(requirement.Materials) == "table" and requirement.Materials or {})
+	for materialKey, amount in pairs(materials) do
+		materials[materialKey] = Economy.ScaleAmount(amount)
+	end
+
 	return {
-		Beli = math.max(0, math.floor(tonumber(requirement.Beli or requirement.Doubloons) or 0)),
-		Materials = table.clone(typeof(requirement.Materials) == "table" and requirement.Materials or {}),
+		Beli = Economy.ScaleAmount(math.max(0, math.floor(tonumber(requirement.Beli or requirement.Doubloons) or 0))),
+		Materials = materials,
 		Rebirths = Config.GetRequiredRebirthsForLevel(clamped + 1),
 		TargetLevel = clamped + 1,
 	}

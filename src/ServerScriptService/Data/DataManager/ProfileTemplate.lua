@@ -7,6 +7,8 @@ local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wa
 local primaryCurrency = Economy.Currency.Primary
 
 local ProfileTemplate = {
+	EconomyVersion = Economy.GetInflationVersion and Economy.GetInflationVersion() or 3,
+
 	leaderstats = {
 		[primaryCurrency.Key] = 0,
 		Rebirths = 0,

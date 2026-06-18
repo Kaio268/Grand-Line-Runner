@@ -1,6 +1,14 @@
 local Economy = {
 	Version = "v2",
 
+	Inflation = {
+		-- Economy version 3 displays all non-Robux economy amounts at 1,000,000x.
+		-- Keep future inflation/rebase changes centralized here so balance data and
+		-- save migrations can move together.
+		Version = 3,
+		Multiplier = 1_000_000,
+	},
+
 	Currency = {
 		Primary = {
 			Key = "Beli",
@@ -621,5 +629,132 @@ local Economy = {
 		},
 	},
 }
+
+local function scaleWholeAmount(value)
+	local numeric = tonumber(value)
+	if numeric == nil then
+		return value
+	end
+
+	return math.floor((numeric * Economy.Inflation.Multiplier) + 0.5)
+end
+
+local function scaleRangeSpec(spec)
+	if typeof(spec) == "number" then
+		return scaleWholeAmount(spec)
+	end
+	if typeof(spec) ~= "table" then
+		return spec
+	end
+
+	if spec.Amount ~= nil then
+		spec.Amount = scaleRangeSpec(spec.Amount)
+	end
+	if spec.Value ~= nil then
+		spec.Value = scaleRangeSpec(spec.Value)
+	end
+	if spec.Min ~= nil then
+		spec.Min = scaleWholeAmount(spec.Min)
+	end
+	if spec.Max ~= nil then
+		spec.Max = scaleWholeAmount(spec.Max)
+	end
+	if spec.min ~= nil then
+		spec.min = scaleWholeAmount(spec.min)
+	end
+	if spec.max ~= nil then
+		spec.max = scaleWholeAmount(spec.max)
+	end
+
+	return spec
+end
+
+local function scaleFlatAmountMap(map)
+	if typeof(map) ~= "table" then
+		return
+	end
+
+	for key, value in pairs(map) do
+		if typeof(value) == "number" then
+			map[key] = scaleWholeAmount(value)
+		else
+			scaleRangeSpec(value)
+		end
+	end
+end
+
+local function scaleRewardBundle(bundle)
+	if typeof(bundle) ~= "table" then
+		return
+	end
+
+	if bundle.Beli ~= nil then
+		bundle.Beli = scaleRangeSpec(bundle.Beli)
+	end
+	if bundle.Doubloons ~= nil then
+		bundle.Doubloons = scaleRangeSpec(bundle.Doubloons)
+	end
+	if bundle.FruitConversionBeli ~= nil then
+		bundle.FruitConversionBeli = scaleWholeAmount(bundle.FruitConversionBeli)
+	end
+	if bundle.FruitConversionDoubloons ~= nil then
+		bundle.FruitConversionDoubloons = scaleWholeAmount(bundle.FruitConversionDoubloons)
+	end
+
+	scaleFlatAmountMap(bundle.Materials)
+
+	local bonusRoll = bundle.BonusRoll
+	local pool = bonusRoll and bonusRoll.Pool
+	if typeof(pool) == "table" then
+		for _, reward in ipairs(pool) do
+			scaleRewardBundle(reward)
+		end
+	end
+end
+
+function Economy.ScaleAmount(value)
+	return scaleWholeAmount(value)
+end
+
+function Economy.ScaleRangeSpec(spec)
+	return scaleRangeSpec(spec)
+end
+
+function Economy.ScaleRewardAmount(rewardType, value)
+	local normalizedType = tostring(rewardType or "")
+	if normalizedType == "Currency" or normalizedType == "Beli" or normalizedType == "Doubloons"
+		or normalizedType == "Material" or normalizedType == "Resource" then
+		return scaleWholeAmount(value)
+	end
+
+	return value
+end
+
+function Economy.GetInflationVersion()
+	return Economy.Inflation.Version
+end
+
+function Economy.GetInflationMultiplier()
+	return Economy.Inflation.Multiplier
+end
+
+Economy.Tutorial.StartingBeli = scaleWholeAmount(Economy.Tutorial.StartingBeli)
+
+for _, tierConfig in pairs(Economy.Chests.Tiers or {}) do
+	scaleRewardBundle(tierConfig.Rewards)
+end
+
+for _, range in pairs(Economy.CrewMembers.BaseIncomeRollByRarity or {}) do
+	scaleRangeSpec(range)
+end
+for _, rarityBands in pairs(Economy.CrewMembers.VariantIncomeBandsByRarity or {}) do
+	for _, range in pairs(rarityBands) do
+		scaleRangeSpec(range)
+	end
+end
+
+for rarityName, amount in pairs(Economy.Crew.ShipIncomePerHourByRarity or {}) do
+	Economy.Crew.ShipIncomePerHourByRarity[rarityName] = scaleWholeAmount(amount)
+end
 
 return Economy
