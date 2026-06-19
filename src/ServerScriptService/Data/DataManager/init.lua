@@ -210,6 +210,7 @@ local MAX_LEGACY_DEPRECATION_RECENT_EVENTS = 20
 
 local PathAliasLookup = {}
 local PrimaryCurrencyConfig = EconomyConfig.Currency and EconomyConfig.Currency.Primary or {}
+local BELI_DIAGNOSTICS_ATTRIBUTE = "BeliDiagnosticsEnabled"
 
 for canonicalPath, aliases in pairs(EconomyConfig.PathAliases or {}) do
 	for _, alias in ipairs(aliases) do
@@ -225,6 +226,82 @@ local function NormalizeDataPath(path: string): string
 	return PathAliasLookup[path] or path
 end
 
+local function isBeliDiagnosticsEnabled(): boolean
+	return ReplicatedStorage:GetAttribute(BELI_DIAGNOSTICS_ATTRIBUTE) == true
+end
+
+local function readDiagnosticPath(root, path)
+	local current = root
+	for segment in string.gmatch(tostring(path or ""), "[^%.]+") do
+		if typeof(current) ~= "table" then
+			return nil
+		end
+		current = current[segment]
+	end
+	return current
+end
+
+local function logBeliDiagnostics(player: Player, phase: string, data)
+	if not isBeliDiagnosticsEnabled() then
+		return
+	end
+
+	local leaderstats = if typeof(data) == "table" then data.leaderstats else nil
+	local totalStats = if typeof(data) == "table" then data.TotalStats else nil
+	local legacy = if typeof(data) == "table" then data.CurrencyLegacy else nil
+	local hidden = if typeof(data) == "table" then data.HiddenLeaderstats else nil
+	print(
+		"[BeliDiagnostics][DataManager]",
+		tostring(phase),
+		"userId",
+		player and player.UserId or "nil",
+		"profileBeli",
+		leaderstats and leaderstats[PrimaryCurrencyConfig.Key],
+		"legacyCurrentBeli",
+		legacy and legacy.CurrentBeli,
+		"doubloons",
+		legacy and legacy.Doubloons,
+		"money",
+		legacy and legacy.Money,
+		"moeny",
+		legacy and legacy.Moeny,
+		"totalBeli",
+		totalStats and totalStats[PrimaryCurrencyConfig.TotalKey],
+		"starterGranted",
+		hidden and hidden.TutorialStarterBeliGranted,
+		"tutorial",
+		hidden and hidden.Tutorial,
+		"tutorialStep",
+		readDiagnosticPath(data, "FirstTimeTutorial.StepIndex"),
+		"tutorialCompleted",
+		readDiagnosticPath(data, "FirstTimeTutorial.Completed")
+	)
+end
+
+local function tracePrimaryCurrencyWrite(player: Player, source: string, path: string, oldValue: any, newValue: any)
+	if not isBeliDiagnosticsEnabled() then
+		return
+	end
+	if NormalizeDataPath(tostring(path or "")) ~= tostring(PrimaryCurrencyConfig.Path or "") then
+		return
+	end
+
+	print(
+		"[BeliDiagnostics][DataManagerWrite]",
+		tostring(source),
+		"userId",
+		player and player.UserId or "nil",
+		"path",
+		tostring(path),
+		"old",
+		tostring(oldValue),
+		"new",
+		tostring(newValue),
+		"trace",
+		debug.traceback("", 2)
+	)
+end
+
 local function SyncCurrencyCompatibilityMirror(player: Player, pathTable: {string}, value: any)
 	local profile = Profiles[player]
 	if profile == nil or typeof(profile.Data) ~= "table" then
@@ -238,6 +315,9 @@ local function SyncCurrencyCompatibilityMirror(player: Player, pathTable: {strin
 	end
 
 	if pathTable[1] == "leaderstats" and pathTable[2] == PrimaryCurrencyConfig.Key then
+		if isBeliDiagnosticsEnabled() then
+			print("[BeliDiagnostics][DataManager]", "syncCurrencyMirror", "userId", player.UserId, "value", value)
+		end
 		legacy.CurrentBeli = value
 		-- Mirrored legacy names are kept out of leaderstats so players only see Beli.
 		legacy.Doubloons = value
@@ -1088,7 +1168,7 @@ function DataManager:TryApplyBatch(player: Player, operations: {any}, options: {
 	end
 
 	for _, entry in ipairs(entries) do
-		local parent, leafKey, _, _, err = ResolveDataPath(profile, entry.Path, true, DeepCopyTable(entry.Value))
+		local parent, leafKey, _, currentValue, err = ResolveDataPath(profile, entry.Path, true, DeepCopyTable(entry.Value))
 		if err then
 			local durationSeconds = os.clock() - startedAt
 			return false, {
@@ -1103,6 +1183,7 @@ function DataManager:TryApplyBatch(player: Player, operations: {any}, options: {
 				ChangedPaths = {},
 			}
 		end
+		tracePrimaryCurrencyWrite(player, "TryApplyBatch", entry.Path, currentValue, entry.Value)
 		parent[leafKey] = DeepCopyTable(entry.Value)
 	end
 
@@ -1206,6 +1287,7 @@ function DataManager:SetValue(player: Player, path: string, newValue : (string |
 
 		if currentValue == nil then
 			currentValue = parent[leafKey]
+			tracePrimaryCurrencyWrite(player, "SetValueInitialize", path, nil, currentValue)
 			SyncDataMutation(player, replica, pathTable, currentValue)
 			return true
 		end
@@ -1228,6 +1310,7 @@ function DataManager:SetValue(player: Player, path: string, newValue : (string |
 		end
 
 		parent[leafKey] = valueToStore
+		tracePrimaryCurrencyWrite(player, "SetValue", path, currentValue, valueToStore)
 		SyncDataMutation(player, replica, pathTable, valueToStore)
 		return true
 	else
@@ -1329,6 +1412,7 @@ function DataManager:AddValue(player, path, addValue, options)
 		local final = currentValue + addValue
 		-- (nie ma sensu robić `pointer = pointer + final`; wystarczy Set do repliki)
 		parent[leafKey] = final
+		tracePrimaryCurrencyWrite(player, "AddValue", path, currentValue, final)
 		SyncDataMutation(player, replica, pathTable, final)
 		return true
 	end
@@ -1789,6 +1873,18 @@ SyncLeaderstatsFolder = function(player: Player, leaderstatsData: {[string]: any
 			end
 
 			valueObject.Value = value
+			if statName == PrimaryCurrencyConfig.Key and isBeliDiagnosticsEnabled() then
+				print(
+					"[BeliDiagnostics][DataManager]",
+					"leaderstatsAssignment",
+					"userId",
+					player.UserId,
+					"value",
+					value,
+					"object",
+					valueObject:GetFullName()
+				)
+			end
 			expectedObjects[valueObject] = true
 			orderedChildren[#orderedChildren + 1] = valueObject
 		end
@@ -2248,6 +2344,7 @@ function PlayerAdded(player: Player)
 	end
 
 	SyncLeaderstatsFolder(player, GetTemplate.leaderstats)
+	logBeliDiagnostics(player, "templateLeaderstatsSynced", GetTemplate)
 
 	-- Ładowanie profilu
 	local profile = PlayerStore:StartSessionAsync(`Player_{player.UserId}`, {
@@ -2259,7 +2356,9 @@ function PlayerAdded(player: Player)
 	if profile ~= nil then
 		profile:AddUserId(player.UserId)
 		profile:Reconcile()
+		logBeliDiagnostics(player, "afterReconcileBeforeMigration", profile.Data)
 		ProfileMigrations.Apply(profile.Data)
+		logBeliDiagnostics(player, "afterMigration", profile.Data)
 		if isMainBootMode() then
 			runCrewMemberShadowWriteOnProfileReady(player, profile)
 			getValidationChecks().WarnProfileData(player, profile.Data)
@@ -2312,6 +2411,21 @@ function PlayerAdded(player: Player)
 			self:UpdateData(player)
 		else
 			self:Leaderstats(player)
+		end
+		logBeliDiagnostics(player, "afterHydration", profile.Data)
+		player.CharacterAdded:Connect(function()
+			task.defer(function()
+				if Profiles[player] == profile then
+					logBeliDiagnostics(player, "afterCharacterSpawn", profile.Data)
+				end
+			end)
+		end)
+		if player.Character ~= nil then
+			task.defer(function()
+				if Profiles[player] == profile then
+					logBeliDiagnostics(player, "afterCharacterSpawnExisting", profile.Data)
+				end
+			end)
 		end
 		markPlayerDataReady(player, dataReadyStartedAt)
 		DataManager:SetupBoostListeners(player)
@@ -2978,6 +3092,7 @@ function DataManager:AdjustValue(player: Player, path: string, delta: number)
 
 	local final = current + delta
 	parent[leafKey] = final               -- <— ZAPIS do profile.Data
+	tracePrimaryCurrencyWrite(player, "AdjustValue", path, current, final)
 	SyncDataMutation(player, replica, pathTable, final)
 
 	return final

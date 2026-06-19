@@ -15,6 +15,7 @@ local STATE_REMOTE_NAME = TutorialConfig.Remotes.StateName
 local TUTORIAL_GUI_NAME = "FirstTimeTutorialGui"
 local OBJECTIVE_GUI_NAME = "FirstTimeTutorialObjectiveGui"
 local TUTORIAL_GUI_TIMEOUT_SECONDS = 10
+local STARTUP_GATE_TIMEOUT_SECONDS = 18
 
 local tutorialGui = playerGui:FindFirstChild(TUTORIAL_GUI_NAME)
 if not tutorialGui then
@@ -46,6 +47,8 @@ local remotesChildConnection = nil
 local requestedInitialState = false
 local advanceRequestInFlight = false
 local skipRequestInFlight = false
+local startupGateStartedAt = os.clock()
+local startupGateTimedOut = false
 
 local tutorialRefs = {
 	darkOverlay = nil,
@@ -131,6 +134,10 @@ end
 local function setVisible(instance, visible)
 	if instance and instance:IsA("GuiObject") then
 		instance.Visible = visible
+		if visible ~= true then
+			instance.Active = false
+			instance.Selectable = false
+		end
 	end
 end
 
@@ -201,6 +208,14 @@ local function hideTutorialFrames()
 	end
 end
 
+local function cleanupCompletedTutorialUi()
+	hideTutorialFrames()
+	if tutorialGui then
+		tutorialGui.Enabled = false
+	end
+	objectiveController:Clear()
+end
+
 local function applyTutorialGuiState(state)
 	if not tutorialGui then
 		return
@@ -208,8 +223,7 @@ local function applyTutorialGuiState(state)
 
 	local active = state and state.active == true and state.completed ~= true
 	if not active then
-		hideTutorialFrames()
-		tutorialGui.Enabled = false
+		cleanupCompletedTutorialUi()
 		return
 	end
 
@@ -232,6 +246,49 @@ local bindRemotesFolder
 local requestAdvance
 local requestSkip
 local scheduleRender
+
+local function hasNumericValue(parent, childName)
+	local child = parent and parent:FindFirstChild(childName)
+	return child ~= nil and child:IsA("ValueBase") and typeof(child.Value) == "number"
+end
+
+local function isStartupReadyForTutorial()
+	if startupGateTimedOut then
+		return true
+	end
+
+	local loadingComplete = playerGui:GetAttribute("LoadingScreenComplete") == true
+		or player:GetAttribute("LoadingScreenComplete") == true
+	local hudReady = playerGui:GetAttribute("StartupHudReady") == true
+		or player:GetAttribute("StartupHudReady") == true
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local hiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
+
+	if loadingComplete and hudReady and root and humanoid and hasNumericValue(leaderstats, "Beli") and hasNumericValue(hiddenLeaderstats, "Speed") then
+		return true
+	end
+
+	if os.clock() - startupGateStartedAt >= STARTUP_GATE_TIMEOUT_SECONDS then
+		startupGateTimedOut = true
+		warn("[FirstTimeTutorial] Startup readiness timed out; showing tutorial with available dependencies.")
+		return true
+	end
+
+	return false
+end
+
+local function refreshStartupGate()
+	if scheduleRender then
+		scheduleRender()
+	end
+	if requestRemote and not requestedInitialState and isStartupReadyForTutorial() then
+		requestedInitialState = true
+		requestState()
+	end
+end
 
 local function connectButton(button, callback)
 	if button and button:IsA("GuiButton") then
@@ -343,6 +400,11 @@ scheduleRender = function()
 			return
 		end
 
+		if not isStartupReadyForTutorial() then
+			cleanupCompletedTutorialUi()
+			return
+		end
+
 		applyTutorialGuiState(tutorialState)
 		renderObjectiveIndicator(tutorialState)
 	end)
@@ -353,11 +415,7 @@ requestSkip = function()
 		return
 	end
 
-	hideTutorialFrames()
-	if tutorialGui then
-		tutorialGui.Enabled = false
-	end
-	objectiveController:Clear()
+	cleanupCompletedTutorialUi()
 
 	if not requestRemote then
 		PopUpModule:Local_SendPopUp("Tutorial service is starting.", Color3.fromRGB(255, 104, 104), Color3.fromRGB(0, 0, 0), 3, true)
@@ -466,8 +524,7 @@ refreshRemotes = function()
 	end
 
 	if requestRemote and not requestedInitialState then
-		requestedInitialState = true
-		requestState()
+		refreshStartupGate()
 	end
 end
 
@@ -507,6 +564,36 @@ table.insert(cleanupConnections, playerGui.ChildAdded:Connect(function(child)
 	end
 end))
 
+for _, attributeName in ipairs({ "LoadingScreenComplete", "StartupHudReady" }) do
+	table.insert(cleanupConnections, playerGui:GetAttributeChangedSignal(attributeName):Connect(refreshStartupGate))
+	table.insert(cleanupConnections, player:GetAttributeChangedSignal(attributeName):Connect(refreshStartupGate))
+end
+
+table.insert(cleanupConnections, player.ChildAdded:Connect(function(child)
+	if child.Name == "leaderstats" or child.Name == "HiddenLeaderstats" then
+		refreshStartupGate()
+		table.insert(cleanupConnections, child.ChildAdded:Connect(refreshStartupGate))
+	end
+end))
+
+table.insert(cleanupConnections, player.CharacterAdded:Connect(function(character)
+	refreshStartupGate()
+	table.insert(cleanupConnections, character.ChildAdded:Connect(refreshStartupGate))
+end))
+
+local existingLeaderstats = player:FindFirstChild("leaderstats")
+if existingLeaderstats then
+	table.insert(cleanupConnections, existingLeaderstats.ChildAdded:Connect(refreshStartupGate))
+end
+local existingHiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
+if existingHiddenLeaderstats then
+	table.insert(cleanupConnections, existingHiddenLeaderstats.ChildAdded:Connect(refreshStartupGate))
+end
+if player.Character then
+	table.insert(cleanupConnections, player.Character.ChildAdded:Connect(refreshStartupGate))
+end
+task.delay(STARTUP_GATE_TIMEOUT_SECONDS, refreshStartupGate)
+
 local existingRemotes = ReplicatedStorage:FindFirstChild("Remotes")
 if existingRemotes then
 	bindRemotesFolder(existingRemotes)
@@ -522,9 +609,6 @@ script.Destroying:Connect(function()
 	destroyed = true
 	disconnectAll()
 	disconnectButtonConnections()
-	hideTutorialFrames()
-	if tutorialGui then
-		tutorialGui.Enabled = false
-	end
+	cleanupCompletedTutorialUi()
 	objectiveController:Destroy()
 end)

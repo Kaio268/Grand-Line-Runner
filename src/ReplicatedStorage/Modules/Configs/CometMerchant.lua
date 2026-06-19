@@ -97,7 +97,7 @@ for itemKey, itemConfig in pairs(CometMerchant.All_Things or {}) do
 			itemConfig.Price = Economy.ScaleAmount(itemConfig.Price)
 		end
 		if tostring(itemKey) == "leaderstats.Beli" and itemConfig.Amount ~= nil then
-			itemConfig.Amount = Economy.ScaleAmount(itemConfig.Amount)
+			itemConfig.Amount = Economy.ScaleBeliAmount(itemConfig.Amount)
 		end
 	end
 end

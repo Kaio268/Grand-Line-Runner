@@ -103,7 +103,7 @@ for _, rewardConfig in pairs(Rewards) do
 			if (rewardName == "Beli" or rewardName == "Money" or rewardName == "Doubloons")
 				and typeof(rewardData) == "table"
 			then
-				rewardData.Amount = Economy.ScaleAmount(rewardData.Amount)
+				rewardData.Amount = Economy.ScaleBeliAmount(rewardData.Amount)
 				rewardConfig.RewName = "+ " .. CurrencyUtil.formatCurrency(rewardData.Amount)
 			end
 		end

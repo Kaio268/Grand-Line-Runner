@@ -15,6 +15,8 @@ local PlayerMovementSpeedService = require(ServerScriptService:WaitForChild("Mod
 local SpeedUpgradeLimits = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("SpeedUpgradeLimits"))
 local TUTORIAL_COMPLETION_PATH = "HiddenLeaderstats.Tutorial"
 local TUTORIAL_SPEED_TOP_UP_GRANTED_PATH = "HiddenLeaderstats.TutorialSpeedTopUpGranted"
+local BELI_DIAGNOSTICS_ATTRIBUTE = "BeliDiagnosticsEnabled"
+local SPEED_UPGRADE_DIAGNOSTICS_ATTRIBUTE = "SpeedUpgradeDiagnosticsEnabled"
 local purchaseLocks = {}
 
 local remote = ReplicatedStorage:FindFirstChild("BuySpeedUpgrade")
@@ -74,13 +76,27 @@ local function applyTutorialSpeedRecovery(player, upgradeIndex, moneyPath, money
 		DataManager:TrySetValue(player, TUTORIAL_SPEED_TOP_UP_GRANTED_PATH, false)
 		return false, 0
 	end
+	DataManager:TryAddValue(player, CurrencyUtil.getTotalPath(), shortfall, { ApplyTitleBuff = false })
 
 	return true, shortfall
+end
+
+local function beliDebug(...)
+	if ReplicatedStorage:GetAttribute(BELI_DIAGNOSTICS_ATTRIBUTE) == true then
+		print("[BeliDiagnostics][SpeedUpgradeServer]", ...)
+	end
+end
+
+local function speedDebug(...)
+	if ReplicatedStorage:GetAttribute(SPEED_UPGRADE_DIAGNOSTICS_ATTRIBUTE) == true then
+		print("[SpeedUpgradeServerDebug]", ...)
+	end
 end
 
 local function rollbackTutorialSpeedRecovery(player, moneyPath, tutorialRecoveryAmount)
 	if tutorialRecoveryAmount > 0 then
 		local rolledBack = DataManager:TryAddValue(player, moneyPath, -tutorialRecoveryAmount)
+		DataManager:TryAddValue(player, CurrencyUtil.getTotalPath(), -tutorialRecoveryAmount)
 		if rolledBack ~= true then
 			warn(string.format(
 				"[BuySpeedUpgrade] failed to roll back tutorial top-up player=%s amount=%s",
@@ -125,6 +141,34 @@ local function handleSpeedUpgrade(player, upgradeName)
 		local moneyValue = CurrencyUtil.findPrimaryValueObject(player)
 		money = (moneyValue and moneyValue.Value) or 0
 	end
+	beliDebug(
+		"validate",
+		"userId",
+		player.UserId,
+		"upgradeIndex",
+		idx,
+		"moneyPath",
+		moneyPath,
+		"money",
+		money,
+		"cost",
+		cost,
+		"speed",
+		speedVal
+	)
+	speedDebug(
+		"validate",
+		"userId",
+		player.UserId,
+		"upgradeIndex",
+		idx,
+		"addSpeed",
+		effectiveAddSpeed,
+		"cost",
+		cost,
+		"currentSpeed",
+		speedVal
+	)
 
 	local usedTutorialRecovery = false
 	local tutorialRecoveryAmount = 0
@@ -156,6 +200,21 @@ local function handleSpeedUpgrade(player, upgradeName)
 		local moneyValue = CurrencyUtil.findPrimaryValueObject(player)
 		chargeMoney = (moneyValue and moneyValue.Value) or 0
 	end
+	beliDebug(
+		"preCharge",
+		"userId",
+		player.UserId,
+		"upgradeIndex",
+		idx,
+		"moneyPath",
+		moneyPath,
+		"chargeMoney",
+		chargeMoney,
+		"cost",
+		cost,
+		"tutorialRecovery",
+		tutorialRecoveryAmount
+	)
 	if chargeMoney < cost then
 		local rollbackOk, rollbackReason = SpeedUpgradeLimits.RollbackSpeedIncrease(DataManager, player, appliedIncrease)
 		if usedTutorialRecovery then

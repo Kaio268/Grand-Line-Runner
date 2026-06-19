@@ -37,6 +37,7 @@ local PUSH_PROGRESS_DELTA = 0.05
 local HIDDEN_LEADERSTATS_NAME = "HiddenLeaderstats"
 local TUTORIAL_VALUE_NAME = "Tutorial"
 local TUTORIAL_STARTER_GRANTED_PATH = "HiddenLeaderstats.TutorialStarterBeliGranted"
+local BELI_DIAGNOSTICS_ATTRIBUTE = "BeliDiagnosticsEnabled"
 local TUTORIAL_CREW_MEMBER_GRANTED_PATH = tostring(
 	(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.GrantedPath)
 		or "HiddenLeaderstats.TutorialCrewMemberGranted"
@@ -307,23 +308,65 @@ end
 
 local function ensureTutorialStarterBeli(player)
 	local granted, reason = DataManager:TryGetValue(player, TUTORIAL_STARTER_GRANTED_PATH)
-	if reason ~= nil or granted == true then
+	if reason ~= nil then
+		if ReplicatedStorage:GetAttribute(BELI_DIAGNOSTICS_ATTRIBUTE) == true then
+			print(
+				"[BeliDiagnostics][TutorialStarter]",
+				"userId",
+				player.UserId,
+				"phase",
+				"skipReadFailed",
+				"reason",
+				tostring(reason)
+			)
+		end
 		return
 	end
 
 	local tutorialAmount = math.max(0, math.floor(tonumber(Economy.Tutorial and Economy.Tutorial.StartingBeli) or 0))
+	local completed = isTutorialCompleted(player)
+	local speed = getSpeedValue(player)
+	if not isTutorialCompleted(player) and getSpeedValue(player) <= 1 then
+		tutorialAmount = math.max(tutorialAmount, getCurrentSpeedUpgradeCost(player))
+	end
+
 	if tutorialAmount > 0 then
-		local shortfall = math.max(0, tutorialAmount - getPrimaryBalance(player))
+		local currentBalance = getPrimaryBalance(player)
+		local shortfall = math.max(0, tutorialAmount - currentBalance)
+		if ReplicatedStorage:GetAttribute(BELI_DIAGNOSTICS_ATTRIBUTE) == true then
+			print(
+				"[BeliDiagnostics][TutorialStarter]",
+				"userId",
+				player.UserId,
+				"granted",
+				tostring(granted),
+				"completed",
+				tostring(completed),
+				"speed",
+				tostring(speed),
+				"tutorialAmount",
+				tostring(tutorialAmount),
+				"currentBalance",
+				tostring(currentBalance),
+				"shortfall",
+				tostring(shortfall)
+			)
+		end
 		if shortfall > 0 then
 			local added = DataManager:TryAddValue(player, CurrencyUtil.getPrimaryPath(), shortfall, { ApplyTitleBuff = false })
 			if added ~= true then
+				if ReplicatedStorage:GetAttribute(BELI_DIAGNOSTICS_ATTRIBUTE) == true then
+					print("[BeliDiagnostics][TutorialStarter]", "userId", player.UserId, "phase", "addFailed")
+				end
 				return
 			end
 			DataManager:TryAddValue(player, CurrencyUtil.getTotalPath(), shortfall, { ApplyTitleBuff = false })
 		end
 	end
 
-	DataManager:TrySetValue(player, TUTORIAL_STARTER_GRANTED_PATH, true)
+	if granted ~= true then
+		DataManager:TrySetValue(player, TUTORIAL_STARTER_GRANTED_PATH, true)
+	end
 end
 
 local function canRecoverSpeedUpgradePurchase(player)
@@ -1782,6 +1825,7 @@ function FirstTimeTutorialService.ResetForTesting(player)
 
 	local flagFailures = {}
 	trySetTutorialResetFlag(player, TutorialConfig.CompletionPath, flagFailures)
+	trySetTutorialResetFlag(player, TUTORIAL_STARTER_GRANTED_PATH, flagFailures)
 	trySetTutorialResetFlag(player, TUTORIAL_CREW_MEMBER_GRANTED_PATH, flagFailures)
 	trySetTutorialResetFlag(player, TUTORIAL_SPEED_TOP_UP_GRANTED_PATH, flagFailures)
 

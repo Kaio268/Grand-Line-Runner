@@ -2305,6 +2305,11 @@ local function crewInventoryIndexTile(props)
 	local item = props.item or {}
 	local quantity = math.max(1, math.floor(tonumber(item.quantity) or 1))
 	local canUseCrewActions = tostring(item.inventoryState or "Stored") == "Stored"
+	local inventoryState = tostring(item.inventoryState or "Stored")
+	local statusBadgeText = if inventoryState == "Placed"
+		then "ON STAND"
+		elseif inventoryState == "Equipped" then "HOTBAR"
+		else nil
 	local actionBandHeight = 42
 	local hasCrewDetails = typeof(item.crewDetails) == "table"
 	local detailsHovered, setDetailsHovered = React.useState(false)
@@ -2397,6 +2402,29 @@ local function crewInventoryIndexTile(props)
 						Font = Enum.Font.GothamBold,
 						Position = UDim2.new(0.5, 0, 0, 10),
 						Text = "IN HAND",
+						TextColor3 = Color3.fromRGB(14, 21, 22),
+						TextSize = 10,
+						TextTruncate = Enum.TextTruncate.AtEnd,
+						ZIndex = 8,
+					}, {
+						Corner = e("UICorner", {
+							CornerRadius = UDim.new(1, 0),
+						}),
+						Padding = e("UIPadding", {
+							PaddingTop = UDim.new(0, 4),
+							PaddingBottom = UDim.new(0, 4),
+							PaddingLeft = UDim.new(0, 10),
+							PaddingRight = UDim.new(0, 10),
+						}),
+					}) or nil,
+					StatusBadge = statusBadgeText ~= nil and e("TextLabel", {
+						AnchorPoint = Vector2.new(0.5, 1),
+						AutomaticSize = Enum.AutomaticSize.XY,
+						BackgroundColor3 = if inventoryState == "Placed" then PALETTE.Orange else PALETTE.Cream,
+						BackgroundTransparency = 0.02,
+						Font = Enum.Font.GothamBold,
+						Position = UDim2.new(0.5, 0, 1, -10),
+						Text = statusBadgeText,
 						TextColor3 = Color3.fromRGB(14, 21, 22),
 						TextSize = 10,
 						TextTruncate = Enum.TextTruncate.AtEnd,
@@ -4572,7 +4600,7 @@ local function App(props)
 	local hotbarHeight = tonumber(hotbarLayout.hotbarHeight) or (mobileLayout and 64 or 96)
 	local scrollerHeight = tonumber(hotbarLayout.scrollerHeight) or (mobileLayout and 58 or 78)
 	local scrollerY = tonumber(hotbarLayout.scrollerY) or (mobileLayout and 4 or 18)
-	local bottomBarZIndex = props.isOpen and 2 or 10
+	local bottomBarZIndex = 10
 	local filledHotbarCount = 0
 	local activeAccent = PALETTE.Sea
 	local pinnedCrewCardKey, setPinnedCrewCardKey = React.useState(nil)

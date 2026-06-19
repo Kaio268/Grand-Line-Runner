@@ -47,6 +47,7 @@ local function HudStatRow(props)
 			valueTextSize = props.valueTextSize,
 			labelTextSize = props.labelTextSize,
 			sourceLabel = item.sourceLabel,
+			detailText = item.detailText,
 			showDivider = index < #props.items,
 		})
 	end

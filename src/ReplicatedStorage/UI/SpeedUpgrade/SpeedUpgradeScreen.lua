@@ -29,6 +29,13 @@ local THEME = {
 	CloseBrightSoft = Color3.fromRGB(235, 70, 78),
 	BackgroundImage = "rbxassetid://75192947200012",
 }
+local SPEED_UPGRADE_DIAGNOSTICS_ATTRIBUTE = "SpeedUpgradeDiagnosticsEnabled"
+
+local function speedScreenDebug(...)
+	if ReplicatedStorage:GetAttribute(SPEED_UPGRADE_DIAGNOSTICS_ATTRIBUTE) == true then
+		print("[SpeedUpgradeScreenDebug]", ...)
+	end
+end
 
 local function gradient(first, second, rotation)
 	return e("UIGradient", {
@@ -229,28 +236,60 @@ local function SpeedUpgradeScreen(props)
 	local rootRef = React.useRef(nil)
 	local buyRef = React.useRef(nil)
 	local closeRef = React.useRef(nil)
+	local contentRef = React.useRef(nil)
+	local listRef = React.useRef(nil)
+	local itemCount = #(props.items or {})
 
 	React.useEffect(function()
 		if props.onRefsChanged then
 			props.onRefsChanged(buyRef.current, closeRef.current, rootRef.current)
 		end
 	end)
+	React.useEffect(function()
+		if props.loading ~= true and itemCount <= 0 then
+			warn("[SpeedUpgradeScreen] Received zero speed upgrade items; no cards will render.")
+		end
+		speedScreenDebug("receivedItems", itemCount, "loading", props.loading == true)
+	end, { itemCount, props.loading })
+	React.useEffect(function()
+		task.defer(function()
+			local root = rootRef.current
+			local content = contentRef.current
+			local list = listRef.current
+			speedScreenDebug(
+				"mountedSizes",
+				"root",
+				root and tostring(root.AbsoluteSize) or "nil",
+				"content",
+				content and tostring(content.AbsoluteSize) or "nil",
+				"list",
+				list and tostring(list.AbsoluteSize) or "nil",
+				"canvas",
+				list and tostring(list.CanvasSize) or "nil",
+				"visible",
+				list and tostring(list.Visible) or "nil",
+				"clips",
+				list and tostring(list.ClipsDescendants) or "nil"
+			)
+		end)
+	end, { itemCount })
 
 	local children = {
 		Padding = e("UIPadding", {
-			PaddingBottom = UDim.new(0, 8),
+			PaddingBottom = UDim.new(0, 6),
 			PaddingLeft = UDim.new(0, 6),
 			PaddingRight = UDim.new(0, 6),
 			PaddingTop = UDim.new(0, 6),
 		}),
 		Layout = e("UIListLayout", {
 			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			Padding = UDim.new(0, 8),
+			Padding = UDim.new(0, 10),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 	}
 
 	for index, item in ipairs(props.items or {}) do
+		speedScreenDebug("createCard", index, tostring(item.key), tostring(item.title))
 		children["Upgrade" .. tostring(index)] = e(upgradeRow, {
 			afterText = item.afterText,
 			buyRef = if index == 1 then buyRef else nil,
@@ -265,6 +304,33 @@ local function SpeedUpgradeScreen(props)
 			end,
 			robuxText = item.robuxText,
 			title = item.title,
+		})
+	end
+	if props.loading == true then
+		children.Loading = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			LayoutOrder = 1,
+			Size = UDim2.new(1, -16, 0, 92),
+			Text = "Loading speed data...",
+			TextColor3 = THEME.TextSecondary,
+			TextSize = 18,
+			TextStrokeColor3 = THEME.GoldShadow,
+			TextStrokeTransparency = 0.7,
+			ZIndex = 6,
+		})
+	elseif #(props.items or {}) <= 0 then
+		children.Empty = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			LayoutOrder = 1,
+			Size = UDim2.new(1, -16, 0, 92),
+			Text = "No speed upgrades available",
+			TextColor3 = THEME.TextSecondary,
+			TextSize = 18,
+			TextStrokeColor3 = THEME.GoldShadow,
+			TextStrokeTransparency = 0.7,
+			ZIndex = 6,
 		})
 	end
 
@@ -385,12 +451,38 @@ local function SpeedUpgradeScreen(props)
 				Gradient = gradient(THEME.CloseBrightSoft, THEME.CloseBright),
 			}),
 		}),
-		List = e("Frame", {
-			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(16, 62),
-			Size = UDim2.new(1, -32, 1, -76),
+		Content = e("Frame", {
+			ref = contentRef,
+			BackgroundColor3 = THEME.PanelFillDark,
+			BackgroundTransparency = 0.12,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(14, 62),
+			Size = UDim2.new(1, -28, 1, -78),
 			ZIndex = 5,
-		}, children),
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 12),
+			}),
+			Stroke = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = THEME.GoldHighlight,
+				Transparency = 0.28,
+				Thickness = 1.25,
+			}),
+			List = e("ScrollingFrame", {
+				ref = listRef,
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				CanvasSize = UDim2.new(),
+				ClipsDescendants = true,
+				Position = UDim2.fromOffset(8, 8),
+				ScrollBarImageColor3 = THEME.GoldBase,
+				ScrollBarThickness = 5,
+				Size = UDim2.new(1, -16, 1, -16),
+				ZIndex = 6,
+			}, children),
+		}),
 	})
 end
 

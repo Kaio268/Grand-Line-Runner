@@ -147,6 +147,8 @@ function ReactFrameModalAdapter.new(options)
 	self.frameBackgroundTransparency = options.frameBackgroundTransparency
 	self.frameClipsDescendants = options.frameClipsDescendants ~= false
 	self.hostClipsDescendants = options.hostClipsDescendants ~= false
+	self.displayOrder = options.displayOrder or FRAMES_DISPLAY_ORDER
+	self.fallbackDisplayOrder = options.fallbackDisplayOrder or self.displayOrder
 	self.frameZIndex = options.frameZIndex or 120
 	self.hostZIndex = options.hostZIndex or 140
 	self.bypassLegacyScaleAnimation = options.bypassLegacyScaleAnimation == true
@@ -280,7 +282,7 @@ function ReactFrameModalAdapter:_getFramesGui(waitTimeout)
 
 		local layer = Instance.new("ScreenGui")
 		layer.Name = STANDALONE_LAYER_NAME
-		layer.DisplayOrder = FRAMES_DISPLAY_ORDER
+		layer.DisplayOrder = self.displayOrder
 		layer.IgnoreGuiInset = true
 		layer.ResetOnSpawn = false
 		layer.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -344,7 +346,7 @@ end
 function ReactFrameModalAdapter:_applyFrameStyling(frame)
 	local framesGui = frame.Parent
 	if framesGui and framesGui:IsA("ScreenGui") then
-		framesGui.DisplayOrder = math.max(framesGui.DisplayOrder, FRAMES_DISPLAY_ORDER)
+		framesGui.DisplayOrder = math.max(framesGui.DisplayOrder, self.displayOrder)
 		framesGui.IgnoreGuiInset = true
 		framesGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	end
@@ -651,7 +653,7 @@ function ReactFrameModalAdapter:EnsureFallbackHost()
 
 	local fallbackGui = Instance.new("ScreenGui")
 	fallbackGui.Name = self.frameName .. "FallbackGui"
-	fallbackGui.DisplayOrder = 160
+	fallbackGui.DisplayOrder = self.fallbackDisplayOrder
 	fallbackGui.IgnoreGuiInset = true
 	fallbackGui.ResetOnSpawn = false
 	fallbackGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling

@@ -474,6 +474,8 @@ local itemState = {}
 local acquisition = {}
 local acquisitionCounter = 0
 local metaState = nil
+local BELI_DIAGNOSTICS_ATTRIBUTE = "BeliDiagnosticsEnabled"
+local lastLedgerBeliDebugKey = ""
 local canonicalChestCountsDirty = true
 local canonicalChestCountsResolved = false
 ClientRuntime.HotbarState = {
@@ -2005,10 +2007,26 @@ local function readPlayerBeli()
 	local leaderstats = player:FindFirstChild("leaderstats")
 	local value = readChildValue(leaderstats, Economy.Currency.Primary.Key)
 	if typeof(value) == "number" then
-		return math.max(0, value)
+		local amount = math.max(0, value)
+		if ReplicatedStorage:GetAttribute(BELI_DIAGNOSTICS_ATTRIBUTE) == true then
+			local key = "leaderstats:" .. tostring(amount)
+			if key ~= lastLedgerBeliDebugKey then
+				lastLedgerBeliDebugKey = key
+				print("[BeliDiagnostics][CaptainLedger]", "userId", player.UserId, "source", "leaderstats", "value", amount)
+			end
+		end
+		return amount
 	end
 
-	return math.max(0, tonumber(metaState and (metaState.Beli or metaState.Doubloons)) or 0)
+	local amount = math.max(0, tonumber(metaState and (metaState.Beli or metaState.Doubloons)) or 0)
+	if ReplicatedStorage:GetAttribute(BELI_DIAGNOSTICS_ATTRIBUTE) == true then
+		local key = "meta:" .. tostring(amount)
+		if key ~= lastLedgerBeliDebugKey then
+			lastLedgerBeliDebugKey = key
+			print("[BeliDiagnostics][CaptainLedger]", "userId", player.UserId, "source", "metaState", "value", amount)
+		end
+	end
+	return amount
 end
 
 local function readPlayerRebirths()

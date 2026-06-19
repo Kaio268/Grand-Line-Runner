@@ -20,7 +20,7 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, triggeringPlayer
 		return
 	end
 
-	if promptTextContains(prompt, "franky") then
+	if promptTextContains(prompt, "frank") then
 		ReactModalRegistry.Open("SpeedUpgrade")
 	end
 end)

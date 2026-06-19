@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -11,7 +12,6 @@ local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChi
 local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local IndexDiscovery = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local TutorialConfigs = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Tutorials"))
-local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local ProfileMigrations = {}
@@ -21,6 +21,7 @@ local CREW_MEMBER_INVENTORY_SCHEMA_VERSION = 2
 local CREW_MEMBER_QUICK_SLOT_SCHEMA_VERSION = 2
 local ECONOMY_INFLATION_VERSION = Economy.GetInflationVersion()
 local ECONOMY_INFLATION_MULTIPLIER = Economy.GetInflationMultiplier()
+local LEGACY_BELI_INFLATION_THRESHOLD = 1_000_000
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -599,50 +600,68 @@ local function migrateLegacyStandLevels(data, sourceLevels)
 	return migrated
 end
 
-local function scaleSavedEconomyNumber(parent, key, scaleCounters)
-	if typeof(parent) ~= "table" or typeof(parent[key]) ~= "number" then
-		return
-	end
+local function mirrorPrimaryCurrency(data)
+	local leaderstats = ensureTable(data, "leaderstats")
+	local totalStats = ensureTable(data, "TotalStats")
+	local currencyLegacy = ensureTable(data, "CurrencyLegacy")
+	local current = coerceNumber(leaderstats[primaryCurrency.Key], 0)
+	local total = coerceNumber(totalStats[primaryCurrency.TotalKey], 0)
 
-	parent[key] = Economy.ScaleAmount(parent[key])
-	scaleCounters.Fields += 1
+	currencyLegacy.CurrentBeli = current
+	currencyLegacy.Doubloons = current
+	currencyLegacy.Money = current
+	currencyLegacy.Moeny = current
+	currencyLegacy.CurrentTotalBeli = total
+	currencyLegacy.TotalDoubloons = total
+	currencyLegacy.TotalMoney = total
 end
 
-local function scaleNumericMapValues(map, scaleCounters)
-	if typeof(map) ~= "table" then
-		return
+local function applyStudioLegacyBeliReset(data, previousVersion)
+	if not RunService:IsStudio() then
+		return false
+	end
+	if math.floor(tonumber(previousVersion) or 0) >= ECONOMY_INFLATION_VERSION then
+		return false
 	end
 
-	for key, value in pairs(map) do
-		if typeof(value) == "number" then
-			map[key] = Economy.ScaleAmount(value)
-			scaleCounters.Fields += 1
+	local leaderstats = ensureTable(data, "leaderstats")
+	local totalStats = ensureTable(data, "TotalStats")
+	local hiddenLeaderstats = ensureTable(data, "HiddenLeaderstats")
+	local currentBeli = coerceNumber(leaderstats[primaryCurrency.Key], 0)
+	local totalBeli = coerceNumber(totalStats[primaryCurrency.TotalKey], 0)
+	if currentBeli < LEGACY_BELI_INFLATION_THRESHOLD and totalBeli < LEGACY_BELI_INFLATION_THRESHOLD then
+		return false
+	end
+
+	leaderstats[primaryCurrency.Key] = 0
+	totalStats[primaryCurrency.TotalKey] = 0
+	hiddenLeaderstats.TutorialStarterBeliGranted = false
+
+	local crewMemberIncome = ensureTable(data, "CrewMemberIncome")
+	for _, row in pairs(crewMemberIncome) do
+		if typeof(row) == "table" then
+			row.IncomeToCollect = 0
 		end
 	end
-end
 
-local function scaleQuestEconomyProgress(quests, scaleCounters)
-	if typeof(quests) ~= "table" then
-		return
-	end
+	local ship = ensureTable(data, "Ship")
+	local captainSlot = ensureTable(ship, "CaptainSlot")
+	captainSlot.IncomeToCollect = 0
 
-	for _, categoryId in ipairs({ "Daily", "Weekly", "Special" }) do
-		local categoryState = quests[categoryId]
-		local progress = if typeof(categoryState) == "table" then categoryState.Progress else nil
-		if typeof(progress) ~= "table" then
-			continue
-		end
+	local afk = ensureTable(data, "AFK")
+	local afkSession = ensureTable(afk, "Session")
+	afkSession.BeliRemainder = 0
+	afkSession.EarnedBeliThisSession = 0
 
-		for questId, value in pairs(progress) do
-			local definition = QuestConfig.GetQuestDefinition(questId)
-			local objective = definition and definition.Objective
-			local objectiveType = tostring(objective and objective.Type or "")
-			if (objectiveType == "EarnBeli" or objectiveType == "EarnDoubloons") and typeof(value) == "number" then
-				progress[questId] = Economy.ScaleAmount(value)
-				scaleCounters.Fields += 1
-			end
-		end
-	end
+	mirrorPrimaryCurrency(data)
+	warn(string.format(
+		"[EconomyBeliScaleRemoval] Studio reset legacy inflated Beli balance economyVersion=%d->%d current=%s total=%s",
+		math.floor(tonumber(previousVersion) or 0),
+		ECONOMY_INFLATION_VERSION,
+		tostring(currentBeli),
+		tostring(totalBeli)
+	))
+	return true
 end
 
 local function applyEconomyInflationMigration(data, previousVersion)
@@ -652,61 +671,14 @@ local function applyEconomyInflationMigration(data, previousVersion)
 		return false
 	end
 
-	local counters = { Fields = 0 }
-	local leaderstats = ensureTable(data, "leaderstats")
-	local totalStats = ensureTable(data, "TotalStats")
-	local currencyLegacy = ensureTable(data, "CurrencyLegacy")
-
-	scaleSavedEconomyNumber(leaderstats, primaryCurrency.Key, counters)
-	scaleSavedEconomyNumber(totalStats, primaryCurrency.TotalKey, counters)
-	for _, key in ipairs({
-		"CurrentBeli",
-		"CurrentTotalBeli",
-		"Doubloons",
-		"Money",
-		"Moeny",
-		"TotalDoubloons",
-		"TotalMoney",
-		"LeaderstatDoubloons",
-		"LeaderstatMoney",
-		"LeaderstatTypo",
-		"LegacyTotalDoubloons",
-		"LegacyTotalMoney",
-	}) do
-		scaleSavedEconomyNumber(currencyLegacy, key, counters)
-	end
-
-	local materials = ensureTable(data, "Materials")
-	for _, key in ipairs({ "Timber", "Iron", "AncientTimber", "CommonShipMaterial", "RareShipMaterial" }) do
-		scaleSavedEconomyNumber(materials, key, counters)
-	end
-	scaleNumericMapValues(materials.Inventory, counters)
-
-	local crewMemberIncome = ensureTable(data, "CrewMemberIncome")
-	for _, row in pairs(crewMemberIncome) do
-		if typeof(row) == "table" then
-			scaleSavedEconomyNumber(row, "IncomeToCollect", counters)
-		end
-	end
-
-	local ship = ensureTable(data, "Ship")
-	local captainSlot = ensureTable(ship, "CaptainSlot")
-	scaleSavedEconomyNumber(captainSlot, "IncomeToCollect", counters)
-
-	local afk = ensureTable(data, "AFK")
-	local afkSession = ensureTable(afk, "Session")
-	scaleSavedEconomyNumber(afkSession, "BeliRemainder", counters)
-	scaleSavedEconomyNumber(afkSession, "EarnedBeliThisSession", counters)
-
-	scaleQuestEconomyProgress(data.Quests, counters)
-
+	local resetInflatedStudioBeli = applyStudioLegacyBeliReset(data, oldVersion)
 	data.EconomyVersion = ECONOMY_INFLATION_VERSION
 	warn(string.format(
-		"[EconomyInflationMigration] migrated profile economyVersion=%d->%d multiplier=%s scaledFields=%d",
+		"[EconomyBeliScaleRemoval] migrated profile economyVersion=%d->%d legacyMultiplier=%s studioReset=%s",
 		oldVersion,
 		ECONOMY_INFLATION_VERSION,
 		tostring(ECONOMY_INFLATION_MULTIPLIER),
-		counters.Fields
+		tostring(resetInflatedStudioBeli)
 	))
 	return true
 end
@@ -721,13 +693,26 @@ function ProfileMigrations.Apply(data)
 
 	local leaderstats = ensureTable(data, "leaderstats")
 	local currencyLegacy = ensureTable(data, "CurrencyLegacy")
+	local existingCurrentBeli = coerceNumber(currencyLegacy.CurrentBeli, 0)
+	local existingCurrentDoubloons = coerceNumber(currencyLegacy.Doubloons, 0)
+	local existingCurrentMoney = coerceNumber(currencyLegacy.Money, 0)
+	local existingCurrentTypo = coerceNumber(currencyLegacy.Moeny, 0)
 	local existingLegacyDoubloons = coerceNumber(currencyLegacy.LeaderstatDoubloons, 0)
 	local existingLegacyMoney = coerceNumber(currencyLegacy.LeaderstatMoney, 0)
 	local existingLegacyTypo = coerceNumber(currencyLegacy.LeaderstatTypo, 0)
 	local legacyDoubloons = coerceNumber(leaderstats[primaryCurrency.LegacyKeys.Leaderstat], existingLegacyDoubloons)
 	local legacyMoney = coerceNumber(leaderstats[primaryCurrency.LegacyKeys.LeaderstatMoney], existingLegacyMoney)
 	local typoMoney = coerceNumber(leaderstats[primaryCurrency.LegacyKeys.LeaderstatTypo], existingLegacyTypo)
-	local resolvedMoney = math.max(coerceNumber(leaderstats[primaryCurrency.Key], 0), legacyDoubloons, legacyMoney, typoMoney)
+	local resolvedMoney = math.max(
+		coerceNumber(leaderstats[primaryCurrency.Key], 0),
+		existingCurrentBeli,
+		existingCurrentDoubloons,
+		existingCurrentMoney,
+		existingCurrentTypo,
+		legacyDoubloons,
+		legacyMoney,
+		typoMoney
+	)
 
 	leaderstats[primaryCurrency.Key] = resolvedMoney
 	leaderstats.Bounty = math.max(0, coerceNumber(leaderstats.Bounty, 0))
@@ -1068,9 +1053,6 @@ function ProfileMigrations.Apply(data)
 	end
 
 	local tutorialStartAmount = coerceNumber(Economy.Tutorial and Economy.Tutorial.StartingBeli, 0)
-	if economyVersionBeforeMigration < ECONOMY_INFLATION_VERSION then
-		tutorialStartAmount = tutorialStartAmount / ECONOMY_INFLATION_MULTIPLIER
-	end
 	if hiddenLeaderstats.TutorialStarterBeliGranted ~= true then
 		if hiddenLeaderstats.Tutorial == true then
 			hiddenLeaderstats.TutorialStarterBeliGranted = true

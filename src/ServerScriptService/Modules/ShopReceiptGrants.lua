@@ -38,8 +38,12 @@ local function addBeli(dataManager, player, amount)
 	addValue(dataManager, player, "TotalStats.TotalBeli", amount)
 end
 
-local function scaledAmount(amount)
+local function scaledMaterialAmount(amount)
 	return Economy.ScaleAmount(amount)
+end
+
+local function scaledBeliAmount(amount)
+	return Economy.ScaleBeliAmount(amount)
 end
 
 local function getContextualTutorialTriggerService()
@@ -177,9 +181,9 @@ function ShopReceiptGrants.GrantStarterPack(player, profile, dataManager)
 		SeaBeastMeat = 3,
 	}
 
-	addBeli(dataManager, player, scaledAmount(250000))
-	addValue(dataManager, player, "Materials.Timber", scaledAmount(250))
-	addValue(dataManager, player, "Materials.Iron", scaledAmount(40))
+	addBeli(dataManager, player, scaledBeliAmount(250000))
+	addValue(dataManager, player, "Materials.Timber", scaledMaterialAmount(250))
+	addValue(dataManager, player, "Materials.Iron", scaledMaterialAmount(40))
 	addValue(dataManager, player, "FoodInventory.Apple", starterPackFood.Apple)
 	addValue(dataManager, player, "FoodInventory.Rice", starterPackFood.Rice)
 	addValue(dataManager, player, "FoodInventory.Meat", starterPackFood.Meat)

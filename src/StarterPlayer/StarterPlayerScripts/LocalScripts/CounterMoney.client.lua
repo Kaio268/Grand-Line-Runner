@@ -12,10 +12,14 @@ local HudCounterConfig = require(ReplicatedStorage:WaitForChild("UI"):WaitForChi
 local HudStatNotificationService = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud"):WaitForChild("HudStatNotificationService"))
 local CounterVisibilityUtil = require(script.Parent:WaitForChild("CounterVisibilityUtil"))
 local currencyConfig = CurrencyUtil.getConfig()
-local moneyValue = CurrencyUtil.waitForPrimaryValueObject(player, 10)
-if not moneyValue then
-	error("Primary currency value object was not found for CounterMoney")
+local BELI_DIAGNOSTICS_ATTRIBUTE = "BeliDiagnosticsEnabled"
+local function beliDebug(...)
+	if ReplicatedStorage:GetAttribute(BELI_DIAGNOSTICS_ATTRIBUTE) == true then
+		print("[BeliDiagnostics][CounterMoney]", ...)
+	end
 end
+
+local moneyValue = nil
 
 local playerGui = player:WaitForChild("PlayerGui")
 local hud = playerGui:WaitForChild("HUD")
@@ -168,7 +172,7 @@ end
 setGradient(normalG0, normalG1)
 setStroke(normalStroke)
 
-local displayed = moneyValue.Value
+local displayed = 0
 textLabel.Text = moneyText(displayed)
 
 local animId = 0
@@ -580,17 +584,132 @@ local function spawnBeliBurst()
 	ensureParticleLoop()
 end
 
-local last = moneyValue.Value
-moneyValue:GetPropertyChangedSignal("Value"):Connect(function()
-	local newVal = moneyValue.Value
-	if newVal == last then
+local last = displayed
+local moneyObjectConnection = nil
+local leaderstatsChildAddedConnection = nil
+local leaderstatsChildRemovedConnection = nil
+local playerChildAddedConnection = nil
+local playerChildRemovedConnection = nil
+
+local function disconnectMoneyObjectConnection()
+	if moneyObjectConnection then
+		moneyObjectConnection:Disconnect()
+		moneyObjectConnection = nil
+	end
+end
+
+local function bindMoneyValue(nextMoneyValue, reason)
+	if not (nextMoneyValue and nextMoneyValue:IsA("ValueBase") and typeof(nextMoneyValue.Value) == "number") then
+		return false
+	end
+	if moneyValue == nextMoneyValue and moneyObjectConnection ~= nil then
+		return true
+	end
+
+	disconnectMoneyObjectConnection()
+	moneyValue = nextMoneyValue
+	local newVal = math.max(0, math.floor((tonumber(moneyValue.Value) or 0) + 0.5))
+	displayed = newVal
+	last = newVal
+	textLabel.Text = moneyText(newVal)
+	setGradient(normalG0, normalG1)
+	setStroke(normalStroke)
+	beliDebug(
+		"bound",
+		"userId",
+		player.UserId,
+		"reason",
+		tostring(reason or "refresh"),
+		"object",
+		moneyValue:GetFullName(),
+		"value",
+		moneyValue.Value
+	)
+
+	moneyObjectConnection = moneyValue:GetPropertyChangedSignal("Value"):Connect(function()
+		local nextValue = math.max(0, math.floor((tonumber(moneyValue.Value) or 0) + 0.5))
+		if nextValue == last then
+			return
+		end
+		local diff = nextValue - last
+		last = nextValue
+		beliDebug("changed", "userId", player.UserId, "new", nextValue, "diff", diff)
+		animateMoney(nextValue)
+		pushNotif(diff)
+		if diff > 0 then
+			spawnBeliBurst()
+		end
+	end)
+	return true
+end
+
+local function refreshMoneyBinding(reason)
+	local current = CurrencyUtil.findPrimaryValueObject(player)
+	if current then
+		return bindMoneyValue(current, reason)
+	end
+	return false
+end
+
+local function disconnectLeaderstatsConnections()
+	if leaderstatsChildAddedConnection then
+		leaderstatsChildAddedConnection:Disconnect()
+		leaderstatsChildAddedConnection = nil
+	end
+	if leaderstatsChildRemovedConnection then
+		leaderstatsChildRemovedConnection:Disconnect()
+		leaderstatsChildRemovedConnection = nil
+	end
+end
+
+local function bindLeaderstatsFolder(leaderstats)
+	disconnectLeaderstatsConnections()
+	if not leaderstats then
 		return
 	end
-	local diff = newVal - last
-	last = newVal
-	animateMoney(newVal)
-	pushNotif(diff)
-	if diff > 0 then
-		spawnBeliBurst()
+
+	leaderstatsChildAddedConnection = leaderstats.ChildAdded:Connect(function(child)
+		if child.Name == currencyConfig.Key then
+			task.defer(refreshMoneyBinding, "leaderstatsChildAdded")
+		end
+	end)
+	leaderstatsChildRemovedConnection = leaderstats.ChildRemoved:Connect(function(child)
+		if child == moneyValue or child.Name == currencyConfig.Key then
+			task.defer(refreshMoneyBinding, "leaderstatsChildRemoved")
+		end
+	end)
+end
+
+bindLeaderstatsFolder(player:FindFirstChild("leaderstats"))
+playerChildAddedConnection = player.ChildAdded:Connect(function(child)
+	if child.Name == "leaderstats" then
+		bindLeaderstatsFolder(child)
+		task.defer(refreshMoneyBinding, "playerLeaderstatsAdded")
+	end
+end)
+playerChildRemovedConnection = player.ChildRemoved:Connect(function(child)
+	if child.Name == "leaderstats" then
+		bindLeaderstatsFolder(nil)
+		task.defer(refreshMoneyBinding, "playerLeaderstatsRemoved")
+	end
+end)
+
+local initialMoneyValue = CurrencyUtil.waitForPrimaryValueObject(player, 10)
+if initialMoneyValue then
+	bindMoneyValue(initialMoneyValue, "initial")
+else
+	warn("[CounterMoney] Primary currency value object was not found; HUD will retry when leaderstats.Beli appears.")
+end
+
+script.Destroying:Connect(function()
+	disconnectMoneyObjectConnection()
+	disconnectLeaderstatsConnections()
+	if playerChildAddedConnection then
+		playerChildAddedConnection:Disconnect()
+		playerChildAddedConnection = nil
+	end
+	if playerChildRemovedConnection then
+		playerChildRemovedConnection:Disconnect()
+		playerChildRemovedConnection = nil
 	end
 end)

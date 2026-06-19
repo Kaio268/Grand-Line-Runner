@@ -116,7 +116,7 @@ function Rebirths.GetBeliCostForRebirth(targetRebirthCount)
 		* (target ^ Rebirths.BeliCostExponent)
 		* (Rebirths.BeliCostGrowth ^ (target - 1))
 
-	return Economy.ScaleAmount(roundToNearest(rawCost, Rebirths.BeliCostRoundTo))
+	return Economy.ScaleBeliAmount(roundToNearest(rawCost, Rebirths.BeliCostRoundTo))
 end
 
 function Rebirths.GetHighestShipLevelForRebirthCount(rebirthCount)

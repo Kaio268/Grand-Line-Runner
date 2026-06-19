@@ -26,6 +26,7 @@ local MIN_DISPLAY_SECONDS = 2.5
 local CRITICAL_PRELOAD_TIMEOUT_SECONDS = 8
 local MAX_LOADING_SCREEN_SECONDS = 15
 local EMERGENCY_WATCHDOG_SECONDS = 30
+local WORLD_STREAM_TIMEOUT_SECONDS = 4
 local REACT_HYDRATION_TIMEOUT_SECONDS = 5
 local REACT_RENDER_THROTTLE_SECONDS = 0.08
 
@@ -372,6 +373,10 @@ local function findBlackOverlays(gui: PlayerGui?): {GuiObject}
 	return overlays
 end
 
+local streamAroundSpawnRequested = false
+local streamAroundSpawnComplete = false
+local streamAroundSpawnTimedOut = false
+
 local function getCharacterHumanoid(): (Model?, Humanoid?)
 	local character = player.Character
 	if not character or not character.Parent then
@@ -380,6 +385,50 @@ local function getCharacterHumanoid(): (Model?, Humanoid?)
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	return character, humanoid
+end
+
+local function getCharacterRootHumanoid(): (Model?, BasePart?, Humanoid?)
+	local character = player.Character
+	if not character or not character.Parent then
+		return character, nil, nil
+	end
+
+	local root = character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	return character, if root and root:IsA("BasePart") then root else nil, humanoid
+end
+
+local function hasNumericValue(parent: Instance?, childName: string): boolean
+	local child = parent and parent:FindFirstChild(childName)
+	return child ~= nil and child:IsA("ValueBase") and typeof(child.Value) == "number"
+end
+
+local function requestStreamAroundSpawnIfNeeded()
+	if streamAroundSpawnRequested or streamAroundSpawnComplete or streamAroundSpawnTimedOut then
+		return
+	end
+	if workspace.StreamingEnabled ~= true then
+		streamAroundSpawnComplete = true
+		return
+	end
+
+	local _, root = getCharacterRootHumanoid()
+	if not root then
+		return
+	end
+
+	streamAroundSpawnRequested = true
+	task.spawn(function()
+		local ok, err = pcall(function()
+			player:RequestStreamAroundAsync(root.Position, WORLD_STREAM_TIMEOUT_SECONDS)
+		end)
+		if ok then
+			streamAroundSpawnComplete = true
+		else
+			streamAroundSpawnTimedOut = true
+			warn(string.format("[LoadingScreen] Spawn stream request failed or timed out: %s", tostring(err)))
+		end
+	end)
 end
 
 local function verifyPostLoadingState(sourceReason: string)
@@ -1443,28 +1492,73 @@ end
 
 local function getStartupMilestoneProgress(): number
 	local progress = 0
+	if game:IsLoaded() then
+		progress += 0.08
+	end
+	if playerGui and playerGui.Parent then
+		progress += 0.06
+	end
 	if isStartupAttributeTrue(STARTUP_DATA_REQUEST_SENT_ATTRIBUTE) then
 		progress += 0.06
 	end
 	if isStartupAttributeTrue(STARTUP_HUD_READY_ATTRIBUTE) then
 		progress += 0.07
 	end
-	if isStartupAttributeTrue(STARTUP_CHARACTER_OBSERVED_ATTRIBUTE) then
+	local _, root, humanoid = getCharacterRootHumanoid()
+	if root then
 		progress += 0.07
+	end
+	if humanoid then
+		progress += 0.07
+	end
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if hasNumericValue(leaderstats, "Beli") then
+		progress += 0.05
+	end
+	local hiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
+	if hasNumericValue(hiddenLeaderstats, "Speed") then
+		progress += 0.05
+	end
+	if streamAroundSpawnComplete or streamAroundSpawnTimedOut then
+		progress += 0.05
 	end
 	return progress
 end
 
 function getMissingStartupMilestones(): {string}
 	local missing = {}
+	if not game:IsLoaded() then
+		missing[#missing + 1] = "GameLoaded"
+	end
+	if not (playerGui and playerGui.Parent) then
+		missing[#missing + 1] = "PlayerGui"
+	end
 	if not isStartupAttributeTrue(STARTUP_DATA_REQUEST_SENT_ATTRIBUTE) then
 		missing[#missing + 1] = STARTUP_DATA_REQUEST_SENT_ATTRIBUTE
 	end
 	if not isStartupAttributeTrue(STARTUP_HUD_READY_ATTRIBUTE) then
 		missing[#missing + 1] = STARTUP_HUD_READY_ATTRIBUTE
 	end
-	if not isStartupAttributeTrue(STARTUP_CHARACTER_OBSERVED_ATTRIBUTE) then
-		missing[#missing + 1] = STARTUP_CHARACTER_OBSERVED_ATTRIBUTE
+	local character, root, humanoid = getCharacterRootHumanoid()
+	if not character then
+		missing[#missing + 1] = "Character"
+	end
+	if not root then
+		missing[#missing + 1] = "HumanoidRootPart"
+	end
+	if not humanoid then
+		missing[#missing + 1] = "Humanoid"
+	end
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not hasNumericValue(leaderstats, "Beli") then
+		missing[#missing + 1] = "leaderstats.Beli"
+	end
+	local hiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
+	if not hasNumericValue(hiddenLeaderstats, "Speed") then
+		missing[#missing + 1] = "HiddenLeaderstats.Speed"
+	end
+	if workspace.StreamingEnabled == true and not (streamAroundSpawnComplete or streamAroundSpawnTimedOut) then
+		missing[#missing + 1] = "SpawnAreaStream"
 	end
 	return missing
 end
@@ -1473,31 +1567,24 @@ local function areStartupMilestonesReady(): boolean
 	return #getMissingStartupMilestones() == 0
 end
 
-local function getMissingVisualStartupMilestones(): {string}
-	local missing = {}
-	if not (playerGui and playerGui.Parent) then
-		missing[#missing + 1] = "PlayerGui"
+local function getStartupStatusMessage(missing: {string}): string
+	local firstMissing = tostring(missing[1] or "")
+	if firstMissing == "GameLoaded" or firstMissing == "SpawnAreaStream" then
+		return "Loading world..."
 	end
-	if not isStartupAttributeTrue(STARTUP_HUD_READY_ATTRIBUTE) then
-		missing[#missing + 1] = STARTUP_HUD_READY_ATTRIBUTE
+	if firstMissing == "PlayerGui" or firstMissing == STARTUP_HUD_READY_ATTRIBUTE then
+		return "Loading HUD..."
 	end
-	if not isStartupAttributeTrue(STARTUP_CHARACTER_OBSERVED_ATTRIBUTE) then
-		missing[#missing + 1] = STARTUP_CHARACTER_OBSERVED_ATTRIBUTE
+	if firstMissing == "Character" or firstMissing == "HumanoidRootPart" or firstMissing == "Humanoid" then
+		return "Loading character..."
 	end
-
-	local camera = workspace.CurrentCamera
-	local _, humanoid = getCharacterHumanoid()
-	if camera == nil then
-		missing[#missing + 1] = "CurrentCamera"
-	elseif camera.CameraSubject == nil and humanoid == nil then
-		missing[#missing + 1] = "CameraSubject"
+	if firstMissing == STARTUP_DATA_REQUEST_SENT_ATTRIBUTE
+		or firstMissing == "leaderstats.Beli"
+		or firstMissing == "HiddenLeaderstats.Speed"
+	then
+		return "Loading player data..."
 	end
-
-	return missing
-end
-
-local function areVisualStartupMilestonesReady(): boolean
-	return #getMissingVisualStartupMilestones() == 0
+	return "Finalizing..."
 end
 
 task.spawn(function()
@@ -1528,6 +1615,7 @@ task.spawn(function()
 	local displayed = 0
 	while isAlive(loadingScreenGui) do
 		local elapsed = os.clock() - startTime
+		requestStreamAroundSpawnIfNeeded()
 
 		if not criticalDone and not criticalTimedOut and elapsed >= CRITICAL_PRELOAD_TIMEOUT_SECONDS then
 			criticalTimedOut = true
@@ -1583,7 +1671,10 @@ task.spawn(function()
 			break
 		end
 
-		local target = 0.15 + (criticalProgress * 0.55) + getStartupMilestoneProgress()
+		local missingMilestones = getMissingStartupMilestones()
+		local startupStatusMessage = if criticalDone or criticalTimedOut then getStartupStatusMessage(missingMilestones) else "Loading world..."
+		setStatusMessage(startupStatusMessage)
+		local target = 0.15 + (criticalProgress * 0.45) + getStartupMilestoneProgress()
 		if elapsed < MIN_DISPLAY_SECONDS then
 			target = math.min(target, 0.15 + (elapsed / MIN_DISPLAY_SECONDS) * 0.35)
 		end
@@ -1592,16 +1683,12 @@ task.spawn(function()
 		displayed += (target - displayed) * 0.2
 		setLoadingState({
 			phase = if criticalDone or criticalTimedOut then "Syncing startup" else "Loading critical assets",
+			statusMessage = startupStatusMessage,
 		})
 		setDisplayedProgress(displayed)
 
 		if elapsed >= MIN_DISPLAY_SECONDS and (criticalDone or criticalTimedOut) and areStartupMilestonesReady() then
 			finalCloseReason = "startup_ready"
-			break
-		end
-
-		if elapsed >= MIN_DISPLAY_SECONDS and (criticalDone or criticalTimedOut) and areVisualStartupMilestonesReady() then
-			finalCloseReason = "startup_visual_ready"
 			break
 		end
 

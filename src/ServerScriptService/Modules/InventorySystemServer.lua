@@ -1,3 +1,4 @@
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -6,6 +7,7 @@ local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChil
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local CrewInventoryStacks = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
+local PlacedCrewState = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("PlacedCrewState"))
 local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 local ServerRestartService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ServerRestartService"))
@@ -965,6 +967,186 @@ local function buildCrewQuickSlotSnapshot(derivedCrewInventory)
 	}
 end
 
+local function compareInstanceIds(left, right)
+	local leftNumber = tonumber(left)
+	local rightNumber = tonumber(right)
+	if leftNumber ~= nil and rightNumber ~= nil and leftNumber ~= rightNumber then
+		return leftNumber < rightNumber
+	end
+	return tostring(left) < tostring(right)
+end
+
+local function buildOrderedCrewInventoryInstanceIds(inventory)
+	local ids = {}
+	local seen = {}
+
+	if typeof(inventory) == "table" and typeof(inventory.Order) == "table" then
+		for _, rawInstanceId in ipairs(inventory.Order) do
+			local instanceId = tostring(rawInstanceId or "")
+			if instanceId ~= "" and seen[instanceId] ~= true then
+				seen[instanceId] = true
+				table.insert(ids, instanceId)
+			end
+		end
+	end
+
+	local remaining = {}
+	if typeof(inventory) == "table" and typeof(inventory.ById) == "table" then
+		for rawInstanceId in pairs(inventory.ById) do
+			local instanceId = tostring(rawInstanceId or "")
+			if instanceId ~= "" and seen[instanceId] ~= true then
+				seen[instanceId] = true
+				table.insert(remaining, instanceId)
+			end
+		end
+	end
+
+	table.sort(remaining, compareInstanceIds)
+	for _, instanceId in ipairs(remaining) do
+		table.insert(ids, instanceId)
+	end
+
+	return ids
+end
+
+local function buildPlacedCrewMetadataFromState(instanceId, placedModel)
+	local attr = PlacedCrewState.Attribute
+	local crewMemberId = firstNonEmpty(
+		placedModel:GetAttribute(attr.CanonicalName),
+		placedModel:GetAttribute(attr.CrewMemberName),
+		placedModel:GetAttribute(attr.BaseName)
+	)
+	local assignedStand = tostring(placedModel:GetAttribute(attr.SlotKey) or "")
+	if crewMemberId == "" or assignedStand == "" then
+		return nil
+	end
+
+	local instanceData = {
+		InstanceId = tostring(instanceId or ""),
+		CrewMemberId = crewMemberId,
+		StorageName = crewMemberId,
+		AssignedStand = assignedStand,
+		DisplayName = firstNonEmpty(placedModel:GetAttribute(attr.DisplayName), crewMemberId),
+		BaseName = firstNonEmpty(placedModel:GetAttribute(attr.BaseName), crewMemberId),
+		Rarity = firstNonEmpty(placedModel:GetAttribute(attr.Rarity)),
+		Variant = firstNonEmpty(placedModel:GetAttribute(attr.Variant)),
+		Income = tonumber(placedModel:GetAttribute(attr.RawIncomePerSecond) or placedModel:GetAttribute(attr.IncomePerSecond)),
+	}
+
+	return buildCrewMetadataFromInstance(instanceId, instanceData, "Placed", {
+		AssignedStand = assignedStand,
+		StackQuantity = 1,
+		StackRepresentative = true,
+	})
+end
+
+local function appendPlacedCrewRosterFallbacks(player, roster, seenInstanceIds)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	for _, placedModel in ipairs(CollectionService:GetTagged(PlacedCrewState.Tag)) do
+		local attr = PlacedCrewState.Attribute
+		if
+			placedModel:GetAttribute(attr.Active) == true
+			and tonumber(placedModel:GetAttribute(attr.OwnerUserId)) == player.UserId
+		then
+			local slotKey = tostring(placedModel:GetAttribute(attr.SlotKey) or "")
+			local crewMemberName = firstNonEmpty(
+				placedModel:GetAttribute(attr.CanonicalName),
+				placedModel:GetAttribute(attr.CrewMemberName),
+				placedModel:GetAttribute(attr.BaseName)
+			)
+			local instanceId = tostring(placedModel:GetAttribute(attr.CrewMemberInstanceId) or "")
+			if instanceId == "" and slotKey ~= "" and crewMemberName ~= "" then
+				instanceId = "Placed:" .. slotKey .. ":" .. crewMemberName
+			end
+
+			if instanceId ~= "" and seenInstanceIds[instanceId] ~= true then
+				local metadata = buildPlacedCrewMetadataFromState(instanceId, placedModel)
+				if metadata ~= nil then
+					local entry = {
+						Name = tostring(metadata.CrewMemberId),
+						Quantity = 1,
+						StackId = "CrewRoster|" .. instanceId,
+						InstanceId = instanceId,
+						RepresentativeInstanceId = instanceId,
+						InstanceIds = { instanceId },
+						CrewMemberId = tostring(metadata.CrewMemberId),
+						State = "Placed",
+						AssignedStand = slotKey,
+					}
+					applyDisplayMetadata(entry, metadata)
+					table.insert(roster, entry)
+					seenInstanceIds[instanceId] = true
+				end
+			end
+		end
+	end
+end
+
+local function buildCrewRosterSnapshot(player, derivedCrewInventory)
+	local inventory = derivedCrewInventory.Inventory
+	local assignments = if typeof(derivedCrewInventory.QuickSlotAssignments) == "table"
+		then derivedCrewInventory.QuickSlotAssignments
+		else {}
+	local slotByInstanceId = {}
+	for rawSlotIndex, rawInstanceId in pairs(assignments) do
+		local instanceId = tostring(rawInstanceId or "")
+		local slotIndex = tonumber(rawSlotIndex)
+		if instanceId ~= "" and slotIndex ~= nil then
+			slotByInstanceId[instanceId] = math.floor(slotIndex)
+		end
+	end
+
+	local roster = {}
+	local seenInstanceIds = {}
+	if typeof(inventory) == "table" and typeof(inventory.ById) == "table" then
+		for _, instanceId in ipairs(buildOrderedCrewInventoryInstanceIds(inventory)) do
+			local instanceData = inventory.ById[instanceId]
+			if typeof(instanceData) == "table" then
+				local assignedStand = tostring(instanceData.AssignedStand or "")
+				local slotIndex = slotByInstanceId[instanceId]
+				local state = if assignedStand ~= ""
+					then "Placed"
+					elseif slotIndex ~= nil then "Equipped"
+					elseif instanceData.Overflow == true then "Overflow"
+					else "Stored"
+				local metadata = buildCrewMetadataFromInstance(instanceId, instanceData, state, {
+					AssignedStand = assignedStand,
+					QuickSlotIndex = slotIndex,
+					StackQuantity = 1,
+					StackRepresentative = true,
+				})
+				if metadata ~= nil then
+					local entry = {
+						Name = tostring(metadata.CrewMemberId),
+						Quantity = 1,
+						StackId = "CrewRoster|" .. instanceId,
+						InstanceId = instanceId,
+						RepresentativeInstanceId = instanceId,
+						InstanceIds = { instanceId },
+						CrewMemberId = tostring(metadata.CrewMemberId),
+						State = state,
+					}
+					if assignedStand ~= "" then
+						entry.AssignedStand = assignedStand
+					end
+					if slotIndex ~= nil then
+						entry.SlotIndex = slotIndex
+					end
+					applyDisplayMetadata(entry, metadata)
+					table.insert(roster, entry)
+					seenInstanceIds[instanceId] = true
+				end
+			end
+		end
+	end
+
+	appendPlacedCrewRosterFallbacks(player, roster, seenInstanceIds)
+	return roster
+end
+
 local function buildInventorySnapshot(player)
 	local ready = isPlayerDataReadyNow(player)
 	if not ready then
@@ -1022,6 +1204,7 @@ local function buildInventorySnapshot(player)
 		})
 	end
 	local crewQuickSlots = buildCrewQuickSlotSnapshot(derivedCrewInventory)
+	local crewRoster = buildCrewRosterSnapshot(player, derivedCrewInventory)
 
 	local gearsFolder = player:FindFirstChild("Gears")
 	if gearsFolder and gearsFolder:IsA("Folder") then
@@ -1049,16 +1232,19 @@ local function buildInventorySnapshot(player)
 		Gears = gears,
 		DevilFruits = devilFruits,
 		Chests = chests,
-		Crew = crew,
+		Crew = if #crewRoster > 0 then crewRoster else crew,
+		CrewRoster = crewRoster,
 		CrewQuickSlots = crewQuickSlots,
 		CrewStorage = {
 			StoredCount = crewStoredCount,
+			OwnedCount = #crewRoster,
 		},
 		Counts = {
 			Gears = #gears,
 			DevilFruits = #devilFruits,
 			Chests = #chests,
-			Crew = crewStoredCount,
+			Crew = #crewRoster,
+			CrewStored = crewStoredCount,
 		},
 	}
 

@@ -95,7 +95,7 @@ local Economy = require(script.Parent:WaitForChild("GrandLineRushEconomy"))
 
 for _, gear in pairs(Gears) do
 	if typeof(gear) == "table" and gear.Price ~= nil then
-		gear.Price = Economy.ScaleAmount(gear.Price)
+		gear.Price = Economy.ScaleBeliAmount(gear.Price)
 	end
 end
 

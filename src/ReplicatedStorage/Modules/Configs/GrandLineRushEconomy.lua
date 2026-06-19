@@ -2,11 +2,11 @@ local Economy = {
 	Version = "v2",
 
 	Inflation = {
-		-- Economy version 3 displays all non-Robux economy amounts at 1,000,000x.
-		-- Keep future inflation/rebase changes centralized here so balance data and
-		-- save migrations can move together.
-		Version = 3,
+		-- Version 4 removes the legacy Beli x1,000,000 scale. The multiplier is
+		-- retained for non-Beli legacy resource paths that still depend on it.
+		Version = 4,
 		Multiplier = 1_000_000,
+		BeliMultiplier = 1,
 	},
 
 	Currency = {
@@ -67,7 +67,7 @@ local Economy = {
 		ChestsAreExtractedThenOpenedAtBase = true,
 		ChestsCanDropCrew = false,
 		CrewLevelsArePerInstance = true,
-		CrewMaxLevel = 50,
+		CrewMaxLevel = 200,
 		DuplicateCrewHandling = "StoreAsSeparateInstances",
 		MaxShipSlots = 38,
 		LoseUnextractedRewardsOnRunFailure = true,
@@ -274,10 +274,23 @@ local Economy = {
 	},
 
 	CrewMembers = {
-		MaxLevel = 50,
-		MaxCrewLevel = 50,
-		MaxLevelIncomeMultiplier = 100,
+		MaxLevel = 200,
+		MaxCrewLevel = 200,
+		LevelIncomeMultiplierPerLevel = 1.25,
 		IncomeRollVersion = 3,
+		-- Single active crew income authority. Values are level-1 Beli/sec and
+		-- are intentionally not passed through the global economy inflation scale.
+		IncomeByRarityVariant = {
+			Common = { Normal = 150, Golden = 750, Diamond = 3750 },
+			Uncommon = { Normal = 750, Golden = 3750, Diamond = 18750 },
+			Rare = { Normal = 5000, Golden = 25000, Diamond = 125000 },
+			Epic = { Normal = 45000, Golden = 225000, Diamond = 1125000 },
+			Legendary = { Normal = 220000, Golden = 1100000, Diamond = 5500000 },
+			Mythic = { Normal = 750000, Golden = 3750000, Diamond = 18750000 },
+			Mythical = { Normal = 750000, Golden = 3750000, Diamond = 18750000 },
+			Godly = { Normal = 5000000, Golden = 25000000, Diamond = 125000000 },
+			Secret = { Normal = 20000000, Golden = 100000000, Diamond = 500000000 },
+		},
 		BaseIncomeRollByRarity = {
 			Common = { Min = 2, Max = 10 },
 			Uncommon = { Min = 17, Max = 55 },
@@ -410,8 +423,8 @@ local Economy = {
 						Apple = { Min = 4, Max = 8 },
 						Rice = { Min = 2, Max = 4 },
 					},
-					Beli = { Min = 250, Max = 600 },
-					FruitConversionBeli = 15,
+					Beli = { Min = 50000, Max = 250000 },
+					FruitConversionBeli = 50000,
 					Materials = {
 						Timber = { Min = 14, Max = 24 },
 						Iron = { Min = 1, Max = 2 },
@@ -423,7 +436,7 @@ local Economy = {
 							{ Materials = { Iron = 1 } },
 							{ Food = { Apple = 4 } },
 							{ Food = { Rice = 3 } },
-							{ Beli = 300 },
+							{ Beli = 125000 },
 						},
 					},
 				},
@@ -436,8 +449,8 @@ local Economy = {
 						Rice = { Min = 4, Max = 7 },
 						Meat = { Min = 2, Max = 3 },
 					},
-					Beli = { Min = 1000, Max = 2500 },
-					FruitConversionBeli = 30,
+					Beli = { Min = 500000, Max = 2500000 },
+					FruitConversionBeli = 500000,
 					Materials = {
 						Timber = { Min = 45, Max = 70 },
 						Iron = { Min = 10, Max = 16 },
@@ -449,7 +462,7 @@ local Economy = {
 							{ Materials = { Iron = 6 } },
 							{ Materials = { AncientTimber = 1 } },
 							{ Food = { Meat = 3 } },
-							{ Beli = 1500 },
+							{ Beli = 1250000 },
 						},
 					},
 				},
@@ -462,8 +475,8 @@ local Economy = {
 						Meat = { Min = 4, Max = 7 },
 						SeaBeastMeat = { Min = 2, Max = 3 },
 					},
-					Beli = { Min = 4000, Max = 8000 },
-					FruitConversionBeli = 120,
+					Beli = { Min = 5000000, Max = 25000000 },
+					FruitConversionBeli = 5000000,
 					Materials = {
 						Timber = { Min = 80, Max = 140 },
 						Iron = { Min = 24, Max = 36 },
@@ -476,7 +489,7 @@ local Economy = {
 							{ Materials = { Iron = 10 } },
 							{ Materials = { AncientTimber = 2 } },
 							{ Food = { SeaBeastMeat = 3 } },
-							{ Beli = 5000 },
+							{ Beli = 12500000 },
 						},
 					},
 				},
@@ -645,6 +658,15 @@ local function scaleWholeAmount(value)
 	return math.floor((numeric * Economy.Inflation.Multiplier) + 0.5)
 end
 
+local function scaleBeliAmount(value)
+	local numeric = tonumber(value)
+	if numeric == nil then
+		return value
+	end
+
+	return math.floor((numeric * (Economy.Inflation.BeliMultiplier or 1)) + 0.5)
+end
+
 local function scaleRangeSpec(spec)
 	if typeof(spec) == "number" then
 		return scaleWholeAmount(spec)
@@ -694,18 +716,8 @@ local function scaleRewardBundle(bundle)
 		return
 	end
 
-	if bundle.Beli ~= nil then
-		bundle.Beli = scaleRangeSpec(bundle.Beli)
-	end
-	if bundle.Doubloons ~= nil then
-		bundle.Doubloons = scaleRangeSpec(bundle.Doubloons)
-	end
-	if bundle.FruitConversionBeli ~= nil then
-		bundle.FruitConversionBeli = scaleWholeAmount(bundle.FruitConversionBeli)
-	end
-	if bundle.FruitConversionDoubloons ~= nil then
-		bundle.FruitConversionDoubloons = scaleWholeAmount(bundle.FruitConversionDoubloons)
-	end
+	-- Chest Beli is authored in final economy units; do not apply the legacy
+	-- global inflation multiplier to Beli, duplicate conversion, or bonus Beli.
 
 	scaleFlatAmountMap(bundle.Materials)
 
@@ -722,14 +734,19 @@ function Economy.ScaleAmount(value)
 	return scaleWholeAmount(value)
 end
 
+function Economy.ScaleBeliAmount(value)
+	return scaleBeliAmount(value)
+end
+
 function Economy.ScaleRangeSpec(spec)
 	return scaleRangeSpec(spec)
 end
 
 function Economy.ScaleRewardAmount(rewardType, value)
 	local normalizedType = tostring(rewardType or "")
-	if normalizedType == "Currency" or normalizedType == "Beli" or normalizedType == "Doubloons"
-		or normalizedType == "Material" or normalizedType == "Resource" then
+	if normalizedType == "Currency" or normalizedType == "Beli" or normalizedType == "Doubloons" then
+		return scaleBeliAmount(value)
+	elseif normalizedType == "Material" or normalizedType == "Resource" then
 		return scaleWholeAmount(value)
 	end
 
@@ -744,19 +761,10 @@ function Economy.GetInflationMultiplier()
 	return Economy.Inflation.Multiplier
 end
 
-Economy.Tutorial.StartingBeli = scaleWholeAmount(Economy.Tutorial.StartingBeli)
+Economy.Tutorial.StartingBeli = scaleBeliAmount(Economy.Tutorial.StartingBeli)
 
 for _, tierConfig in pairs(Economy.Chests.Tiers or {}) do
 	scaleRewardBundle(tierConfig.Rewards)
-end
-
-for _, range in pairs(Economy.CrewMembers.BaseIncomeRollByRarity or {}) do
-	scaleRangeSpec(range)
-end
-for _, rarityBands in pairs(Economy.CrewMembers.VariantIncomeBandsByRarity or {}) do
-	for _, range in pairs(rarityBands) do
-		scaleRangeSpec(range)
-	end
 end
 
 for rarityName, amount in pairs(Economy.Crew.ShipIncomePerHourByRarity or {}) do

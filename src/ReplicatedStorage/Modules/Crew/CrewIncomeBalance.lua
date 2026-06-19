@@ -10,8 +10,8 @@ local CrewIncomeBalance = {}
 
 local DEFAULT_RARITY = "Common"
 local DEFAULT_VARIANT = "Normal"
-local DEFAULT_MAX_LEVEL = 50
-local DEFAULT_MAX_LEVEL_INCOME_MULTIPLIER = 100
+local DEFAULT_MAX_LEVEL = 200
+local DEFAULT_LEVEL_INCOME_MULTIPLIER_PER_LEVEL = 1.25
 local CLAIM_EPSILON = 1e-7
 local baseIncomeRangeCache = {}
 local baseIncomeRangeMidpointCache = {}
@@ -72,6 +72,10 @@ end
 
 local function getVariantBandConfig()
 	return getCrewConfig().VariantIncomeBandsByRarity or {}
+end
+
+local function getFixedIncomeConfig()
+	return getCrewConfig().IncomeByRarityVariant or {}
 end
 
 local function roundWhole(value)
@@ -145,6 +149,9 @@ function CrewIncomeBalance.NormalizeRarity(rarity)
 	if getIncomeRollConfig()[raw] ~= nil then
 		return raw
 	end
+	if getFixedIncomeConfig()[raw] ~= nil then
+		return raw
+	end
 
 	return DEFAULT_RARITY
 end
@@ -182,13 +189,17 @@ function CrewIncomeBalance.GetMaxLevel()
 	)
 end
 
-function CrewIncomeBalance.GetMaxLevelIncomeMultiplier()
-	local configured = tonumber(getCrewConfig().MaxLevelIncomeMultiplier)
+function CrewIncomeBalance.GetLevelIncomeMultiplierPerLevel()
+	local configured = tonumber(getCrewConfig().LevelIncomeMultiplierPerLevel)
 	if configured == nil or configured ~= configured or configured == math.huge or configured == -math.huge then
-		return DEFAULT_MAX_LEVEL_INCOME_MULTIPLIER
+		return DEFAULT_LEVEL_INCOME_MULTIPLIER_PER_LEVEL
 	end
 
 	return math.max(1, configured)
+end
+
+function CrewIncomeBalance.GetMaxLevelIncomeMultiplier()
+	return CrewIncomeBalance.GetLevelIncomeMultiplierPerLevel() ^ (CrewIncomeBalance.GetMaxLevel() - 1)
 end
 
 function CrewIncomeBalance.NormalizeLevel(level)
@@ -201,13 +212,32 @@ function CrewIncomeBalance.NormalizeLevel(level)
 end
 
 function CrewIncomeBalance.GetLevelIncomeMultiplier(level)
-	local maxLevel = CrewIncomeBalance.GetMaxLevel()
-	local progress = (CrewIncomeBalance.NormalizeLevel(level) - 1) / math.max(1, maxLevel - 1)
-	return CrewIncomeBalance.GetMaxLevelIncomeMultiplier() ^ progress
+	return CrewIncomeBalance.GetLevelIncomeMultiplierPerLevel() ^ (CrewIncomeBalance.NormalizeLevel(level) - 1)
+end
+
+function CrewIncomeBalance.GetFixedBaseVariantIncome(rarity, variant)
+	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local variantKey = CrewIncomeBalance.NormalizeVariant(variant)
+	local rarityConfig = getFixedIncomeConfig()[normalizedRarity]
+	if typeof(rarityConfig) ~= "table" then
+		rarityConfig = getFixedIncomeConfig()[DEFAULT_RARITY]
+	end
+
+	local value = if typeof(rarityConfig) == "table" then rarityConfig[variantKey] else nil
+	if value == nil and typeof(rarityConfig) == "table" then
+		value = rarityConfig[DEFAULT_VARIANT]
+	end
+
+	return roundWhole(value), normalizedRarity, variantKey
 end
 
 function CrewIncomeBalance.GetBaseIncomeRange(rarity)
 	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local fixedIncome = CrewIncomeBalance.GetFixedBaseVariantIncome(normalizedRarity, DEFAULT_VARIANT)
+	if fixedIncome > 0 then
+		return fixedIncome, fixedIncome, normalizedRarity
+	end
+
 	local cached = baseIncomeRangeCache[normalizedRarity]
 	if cached then
 		return cached.Min, cached.Max, normalizedRarity
@@ -260,6 +290,11 @@ end
 function CrewIncomeBalance.GetVariantIncomeRange(rarity, variant)
 	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
 	local variantKey = CrewIncomeBalance.NormalizeVariant(variant)
+	local fixedIncome = CrewIncomeBalance.GetFixedBaseVariantIncome(normalizedRarity, variantKey)
+	if fixedIncome > 0 then
+		return fixedIncome, fixedIncome, normalizedRarity, variantKey
+	end
+
 	local cacheId = cacheKey(normalizedRarity, variantKey)
 	local cached = variantIncomeRangeCache[cacheId]
 	if cached then
@@ -388,6 +423,11 @@ function CrewIncomeBalance.GetVariantIncomeMultiplier(variant)
 end
 
 function CrewIncomeBalance.GetBaseVariantIncome(baseIncomeRoll, variant, rarity)
+	local fixedIncome = CrewIncomeBalance.GetFixedBaseVariantIncome(rarity, variant)
+	if fixedIncome > 0 then
+		return fixedIncome
+	end
+
 	local mappedIncome = CrewIncomeBalance.GetVariantBandMappedIncome(rarity, baseIncomeRoll, variant)
 	-- Variant bands and variant multipliers are intentionally stacked so
 	-- Golden and Diamond crewmates feel meaningfully more rewarding.
@@ -402,9 +442,22 @@ end
 function CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variant, level, rarity)
 	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
 	local variantKey = CrewIncomeBalance.NormalizeVariant(variant)
+	local normalizedLevel = CrewIncomeBalance.NormalizeLevel(level)
+	local fixedIncome = CrewIncomeBalance.GetFixedBaseVariantIncome(normalizedRarity, variantKey)
+	if fixedIncome > 0 then
+		local key = cacheKey(normalizedRarity, variantKey, normalizedLevel, "fixed")
+		local cached = computeIncomeCache[key]
+		if cached ~= nil then
+			return cached
+		end
+
+		local income = roundWhole(fixedIncome * CrewIncomeBalance.GetLevelIncomeMultiplier(normalizedLevel))
+		computeIncomeCache[key] = income
+		return income
+	end
+
 	local normalizedRoll = CrewIncomeBalance.NormalizeBaseIncomeRoll(normalizedRarity, baseIncomeRoll)
 		or CrewIncomeBalance.GetBaseIncomeRangeMidpoint(normalizedRarity)
-	local normalizedLevel = CrewIncomeBalance.NormalizeLevel(level)
 	local key = cacheKey(normalizedRarity, variantKey, normalizedLevel, normalizedRoll)
 	local cached = computeIncomeCache[key]
 	if cached ~= nil then
@@ -423,6 +476,11 @@ function CrewIncomeBalance.GetRawBankIncomePerSecond(instanceData)
 
 	local rarity = CrewIncomeBalance.NormalizeRarity(instanceData.Rarity)
 	local variant = CrewIncomeBalance.NormalizeVariant(instanceData.Variant)
+	local fixedIncome = CrewIncomeBalance.GetFixedBaseVariantIncome(rarity, variant)
+	if fixedIncome > 0 then
+		return fixedIncome
+	end
+
 	local baseIncomeRoll = tonumber(instanceData.BaseIncomeRoll)
 	if
 		baseIncomeRoll == nil
@@ -478,8 +536,15 @@ function CrewIncomeBalance.GetVariantUpgradeCostMultiplier(variant)
 end
 
 function CrewIncomeBalance.GetRangeDisplayIncome(rarity, variant, level)
+	local fixedIncome = CrewIncomeBalance.GetFixedBaseVariantIncome(rarity, variant)
+	if fixedIncome > 0 then
+		local displayIncome = CrewIncomeBalance.ComputeIncome(fixedIncome, variant, level, rarity)
+		return displayIncome, displayIncome
+	end
+
 	local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(rarity)
-	return CrewIncomeBalance.ComputeIncome(minValue, variant, level, rarity), CrewIncomeBalance.ComputeIncome(maxValue, variant, level, rarity)
+	return CrewIncomeBalance.ComputeIncome(minValue, variant, level, rarity),
+		CrewIncomeBalance.ComputeIncome(maxValue, variant, level, rarity)
 end
 
 return CrewIncomeBalance

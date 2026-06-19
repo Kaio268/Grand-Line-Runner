@@ -74,7 +74,7 @@ local function registerQuest(questDefinition)
 	if typeof(storedDefinition.Objective) == "table" then
 		local objective = table.clone(storedDefinition.Objective)
 		if tostring(objective.Type or "") == "EarnBeli" or tostring(objective.Type or "") == "EarnDoubloons" then
-			objective.Target = Economy.ScaleAmount(objective.Target)
+			objective.Target = Economy.ScaleBeliAmount(objective.Target)
 		end
 		storedDefinition.Objective = objective
 	end

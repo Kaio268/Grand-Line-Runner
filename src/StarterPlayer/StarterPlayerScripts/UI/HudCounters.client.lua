@@ -1,3 +1,4 @@
+local CollectionService = game:GetService("CollectionService")
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,11 +8,14 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
+local Modules = ReplicatedStorage:WaitForChild("Modules")
 local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local Responsive = require(UiFolder:WaitForChild("Responsive"))
+local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local PlacedCrewState = require(Modules:WaitForChild("Crew"):WaitForChild("PlacedCrewState"))
 local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 local HudStatRow = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStatRow"))
 local HudStatNotificationLayer = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStatNotificationLayer"))
@@ -61,6 +65,7 @@ local root = ReactRoblox.createRoot(rootContainer)
 
 local destroyed = false
 local renderQueued = false
+local pendingIncomeText = ""
 
 local function round(value)
 	return math.floor(value + 0.5)
@@ -522,6 +527,7 @@ local function buildItems(counters)
 			kind = statKind,
 			name = host.Name,
 			sourceLabel = host.Name,
+			detailText = if host.Name == "Money" then pendingIncomeText else nil,
 		}
 	end
 
@@ -579,6 +585,110 @@ local function scheduleRender()
 		renderQueued = false
 		render()
 	end)
+end
+
+local pendingIncomeConnections = {}
+local pendingIncomeInstanceConnections = {}
+
+local function disconnectPendingIncomeTracking()
+	for _, connection in ipairs(pendingIncomeConnections) do
+		connection:Disconnect()
+	end
+	table.clear(pendingIncomeConnections)
+
+	for _, connections in pairs(pendingIncomeInstanceConnections) do
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+	end
+	table.clear(pendingIncomeInstanceConnections)
+end
+
+local function getPlacedCrewIncomeRate(instance)
+	if typeof(instance) ~= "Instance" then
+		return 0
+	end
+	if instance:GetAttribute(PlacedCrewState.Attribute.Active) ~= true then
+		return 0
+	end
+	local ownerUserId = tonumber(instance:GetAttribute(PlacedCrewState.Attribute.OwnerUserId)) or 0
+	if ownerUserId ~= player.UserId then
+		return 0
+	end
+
+	return math.max(
+		0,
+		tonumber(instance:GetAttribute(PlacedCrewState.Attribute.ClaimIncomePerSecond))
+			or tonumber(instance:GetAttribute(PlacedCrewState.Attribute.IncomePerSecond))
+			or 0
+	)
+end
+
+local function refreshPendingIncomeText()
+	local totalIncomePerSecond = 0
+	for _, instance in ipairs(CollectionService:GetTagged(PlacedCrewState.Tag)) do
+		totalIncomePerSecond += getPlacedCrewIncomeRate(instance)
+	end
+
+	local nextText = if totalIncomePerSecond > 0
+		then "Unclaimed: +" .. CurrencyUtil.formatIncomePerSecond(totalIncomePerSecond)
+		else ""
+	if pendingIncomeText ~= nextText then
+		pendingIncomeText = nextText
+		scheduleRender()
+	end
+end
+
+local function bindPlacedCrewIncomeInstance(instance)
+	if pendingIncomeInstanceConnections[instance] ~= nil then
+		return
+	end
+
+	local connections = {}
+	pendingIncomeInstanceConnections[instance] = connections
+	local function trackAttribute(attributeName)
+		connections[#connections + 1] = instance:GetAttributeChangedSignal(attributeName):Connect(refreshPendingIncomeText)
+	end
+
+	trackAttribute(PlacedCrewState.Attribute.Active)
+	trackAttribute(PlacedCrewState.Attribute.OwnerUserId)
+	trackAttribute(PlacedCrewState.Attribute.IncomePerSecond)
+	trackAttribute(PlacedCrewState.Attribute.ClaimIncomePerSecond)
+	connections[#connections + 1] = instance.Destroying:Connect(function()
+		local existing = pendingIncomeInstanceConnections[instance]
+		pendingIncomeInstanceConnections[instance] = nil
+		if existing then
+			for _, connection in ipairs(existing) do
+				connection:Disconnect()
+			end
+		end
+		refreshPendingIncomeText()
+	end)
+end
+
+local function unbindPlacedCrewIncomeInstance(instance)
+	local connections = pendingIncomeInstanceConnections[instance]
+	pendingIncomeInstanceConnections[instance] = nil
+	if connections then
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+	end
+	refreshPendingIncomeText()
+end
+
+local function bindPendingIncomeTracking()
+	for _, instance in ipairs(CollectionService:GetTagged(PlacedCrewState.Tag)) do
+		bindPlacedCrewIncomeInstance(instance)
+	end
+	pendingIncomeConnections[#pendingIncomeConnections + 1] =
+		CollectionService:GetInstanceAddedSignal(PlacedCrewState.Tag):Connect(function(instance)
+			bindPlacedCrewIncomeInstance(instance)
+			refreshPendingIncomeText()
+		end)
+	pendingIncomeConnections[#pendingIncomeConnections + 1] =
+		CollectionService:GetInstanceRemovedSignal(PlacedCrewState.Tag):Connect(unbindPlacedCrewIncomeInstance)
+	refreshPendingIncomeText()
 end
 
 local relevantNames = {
@@ -639,6 +749,7 @@ if currentCamera then
 end
 
 bindHudConnections()
+bindPendingIncomeTracking()
 render()
 
 script.Destroying:Connect(function()
@@ -648,6 +759,7 @@ script.Destroying:Connect(function()
 	if viewportConnection then
 		viewportConnection:Disconnect()
 	end
+	disconnectPendingIncomeTracking()
 	disconnectHudConnections()
 	root:unmount()
 end)

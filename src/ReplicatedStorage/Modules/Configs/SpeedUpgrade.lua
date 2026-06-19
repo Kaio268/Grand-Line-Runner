@@ -48,7 +48,7 @@ local function computeRawCost(config, currentSpeed)
 end
 
 function SpeeUpgrade.ComputeCost(config, currentSpeed)
-	return Economy.ScaleAmount(computeRawCost(config, currentSpeed))
+	return Economy.ScaleBeliAmount(computeRawCost(config, currentSpeed))
 end
 
 return SpeeUpgrade

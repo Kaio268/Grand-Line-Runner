@@ -249,6 +249,7 @@ local function HudStatCounter(props)
 	local fallbackLabel = tostring(props.sourceLabel or props.name or "")
 	local valueText, labelText = extractDisplayParts(state.text, fallbackLabel)
 	valueText = simplifyValueText(props.kind, valueText)
+	local detailText = tostring(props.detailText or "")
 
 	local rowHeight = tonumber(props.rowHeight) or HudCounterConfig.RowHeight
 	local iconSlotWidth = tonumber(props.iconSlotWidth) or HudCounterConfig.IconSlotWidth
@@ -416,8 +417,8 @@ local function HudStatCounter(props)
 					AutomaticSize = Enum.AutomaticSize.X,
 					BackgroundTransparency = 1,
 					BorderSizePixel = 0,
-					Position = UDim2.fromScale(0, 0.5),
-					Size = UDim2.fromScale(0, 1),
+					Position = if detailText ~= "" then UDim2.fromScale(0, 0.38) else UDim2.fromScale(0, 0.5),
+					Size = if detailText ~= "" then UDim2.fromScale(0, 0.58) else UDim2.fromScale(0, 1),
 					ZIndex = rowZIndex + 4,
 				}, {
 					Layout = e("UIListLayout", {
@@ -456,6 +457,24 @@ local function HudStatCounter(props)
 						zIndex = rowZIndex + 5,
 					}) or nil,
 				}),
+				Detail = detailText ~= "" and e("TextLabel", {
+					AnchorPoint = Vector2.new(0, 0.5),
+					AutomaticSize = Enum.AutomaticSize.X,
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					Font = Enum.Font.GothamBold,
+					Position = UDim2.fromScale(0, 0.74),
+					Size = UDim2.fromScale(0, 0.36),
+					Text = detailText,
+					TextColor3 = palette.label,
+					TextSize = math.max(10, math.floor(labelTextSize * 0.72)),
+					TextStrokeColor3 = palette.stroke,
+					TextStrokeTransparency = math.min(0.45, labelStroke + 0.18),
+					TextTransparency = 0.08,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextYAlignment = Enum.TextYAlignment.Center,
+					ZIndex = rowZIndex + 5,
+				}) or nil,
 			}),
 		}),
 		Divider = showDivider and e("Frame", {

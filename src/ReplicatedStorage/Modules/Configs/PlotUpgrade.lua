@@ -141,7 +141,7 @@ function Config.GetRequirementForLevel(level)
 	end
 
 	return {
-		Beli = Economy.ScaleAmount(math.max(0, math.floor(tonumber(requirement.Beli or requirement.Doubloons) or 0))),
+		Beli = Economy.ScaleBeliAmount(math.max(0, math.floor(tonumber(requirement.Beli or requirement.Doubloons) or 0))),
 		Materials = materials,
 		Rebirths = Config.GetRequiredRebirthsForLevel(clamped + 1),
 		TargetLevel = clamped + 1,
