@@ -3,6 +3,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
+local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local AddCrewMember = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AddCrewMember"))
 local CrewProtectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewProtectionService"))
 
@@ -35,6 +36,10 @@ end
 local function addBeli(dataManager, player, amount)
 	addValue(dataManager, player, "leaderstats.Beli", amount)
 	addValue(dataManager, player, "TotalStats.TotalBeli", amount)
+end
+
+local function scaledAmount(amount)
+	return Economy.ScaleAmount(amount)
 end
 
 local function getContextualTutorialTriggerService()
@@ -165,24 +170,26 @@ function ShopReceiptGrants.GrantStarterPack(player, profile, dataManager)
 		return fail(reason)
 	end
 
-	addBeli(dataManager, player, 250000)
-	addValue(dataManager, player, "Materials.Timber", 250)
-	addValue(dataManager, player, "Materials.Iron", 40)
-	addValue(dataManager, player, "FoodInventory.Apple", 20)
-	addValue(dataManager, player, "FoodInventory.Rice", 15)
-	addValue(dataManager, player, "FoodInventory.Meat", 10)
-	addValue(dataManager, player, "FoodInventory.SeaBeastMeat", 3)
+	local starterPackFood = {
+		Apple = 20,
+		Rice = 15,
+		Meat = 10,
+		SeaBeastMeat = 3,
+	}
+
+	addBeli(dataManager, player, scaledAmount(250000))
+	addValue(dataManager, player, "Materials.Timber", scaledAmount(250))
+	addValue(dataManager, player, "Materials.Iron", scaledAmount(40))
+	addValue(dataManager, player, "FoodInventory.Apple", starterPackFood.Apple)
+	addValue(dataManager, player, "FoodInventory.Rice", starterPackFood.Rice)
+	addValue(dataManager, player, "FoodInventory.Meat", starterPackFood.Meat)
+	addValue(dataManager, player, "FoodInventory.SeaBeastMeat", starterPackFood.SeaBeastMeat)
 	ShopReceiptGrants.GrantBoost(player, dataManager, "MoneyBoost", 60 * 60)
 	ShopReceiptGrants.GrantBoost(player, dataManager, "SpeedBoost", 60 * 60)
 	ShopReceiptGrants.GrantBoost(player, dataManager, "LuckBoost", 60 * 60)
 	assertOk(CrewProtectionService.GrantCrewShieldTokens(player, 3, dataManager))
 	setValue(dataManager, player, STARTER_PACK_FLAG, true)
-	triggerFoodAndShipTutorials(player, "shop_starter_pack", {
-		Apple = 20,
-		Rice = 15,
-		Meat = 10,
-		SeaBeastMeat = 3,
-	})
+	triggerFoodAndShipTutorials(player, "shop_starter_pack", starterPackFood)
 
 	return true, "granted"
 end

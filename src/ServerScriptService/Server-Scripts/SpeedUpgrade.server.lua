@@ -25,30 +25,14 @@ if not remote then
 end
 
 local function computeCost(cfg, speedVal, stepCount)
-	local starter = cfg.Starter_Price or 0
-	local mult = cfg.Price_Mult or 1
 	local addSpeed = cfg.AddSpeed or 1
 	if typeof(stepCount) == "number" then
 		addSpeed = stepCount
 	end
 
-	local s = tonumber(speedVal) or 1
-	if s < 1 then
-		s = 1
-	end
-
-	local level = math.max(s - 1, 0)
-
-	local function priceForLevel(lv)
-		return starter * (mult ^ lv)
-	end
-
-	local total = 0
-	for i = 0, addSpeed - 1 do
-		total += priceForLevel(level + i)
-	end
-
-	return math.floor(total + 0.5)
+	local costConfig = table.clone(cfg)
+	costConfig.AddSpeed = addSpeed
+	return SpeedUpgrade.ComputeCost(costConfig, speedVal)
 end
 
 local function isTutorialIncomplete(player)

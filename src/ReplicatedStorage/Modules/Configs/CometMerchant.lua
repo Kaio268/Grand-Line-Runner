@@ -1,3 +1,5 @@
+local Economy = require(script.Parent:WaitForChild("GrandLineRushEconomy"))
+
 local CometMerchant = {
 	RequiresPaidRandomItemPolicy = false,
 	RobuxFundedRandomCurrency = false,
@@ -88,5 +90,16 @@ local CometMerchant = {
 		},
 	},
 }
+
+for itemKey, itemConfig in pairs(CometMerchant.All_Things or {}) do
+	if typeof(itemConfig) == "table" then
+		if itemConfig.Price ~= nil then
+			itemConfig.Price = Economy.ScaleAmount(itemConfig.Price)
+		end
+		if tostring(itemKey) == "leaderstats.Beli" and itemConfig.Amount ~= nil then
+			itemConfig.Amount = Economy.ScaleAmount(itemConfig.Amount)
+		end
+	end
+end
 
 return CometMerchant

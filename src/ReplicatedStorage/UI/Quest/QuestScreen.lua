@@ -4,6 +4,7 @@ local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 
 local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local e = React.createElement
 
@@ -79,6 +80,17 @@ local function categoryTint(category, questId)
 		return SHELL.SpecialTint
 	end
 	return SHELL.DailyTint
+end
+
+local function formatQuestProgress(quest)
+	local progress = tonumber(quest.progress) or 0
+	local target = tonumber(quest.target) or 1
+	local objectiveType = tostring(quest.objectiveType or "")
+	if objectiveType == "EarnBeli" or objectiveType == "EarnDoubloons" then
+		return string.format("%s / %s", CurrencyUtil.formatCompactNumber(progress), CurrencyUtil.formatCompactNumber(target))
+	end
+
+	return string.format("%d / %d", progress, target)
 end
 
 local function goldStroke(thickness, transparency)
@@ -384,7 +396,7 @@ local function questCard(props)
 			Font = BODY,
 			Position = UDim2.fromOffset(18, compact and 88 or 78),
 			Size = UDim2.fromOffset(120, 18),
-			Text = string.format("%d / %d", tonumber(quest.progress) or 0, tonumber(quest.target) or 1),
+			Text = formatQuestProgress(quest),
 			TextColor3 = SHELL.TextMain,
 			TextSize = 15,
 			TextStrokeColor3 = SHELL.TextShadow,

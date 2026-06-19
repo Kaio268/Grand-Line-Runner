@@ -1,3 +1,8 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+
 local Rewards = {
 
 	[1] = {
@@ -90,5 +95,19 @@ local Rewards = {
 		},
 	},
 }
+
+for _, rewardConfig in pairs(Rewards) do
+	local rewardMap = rewardConfig.Rewards
+	if typeof(rewardMap) == "table" then
+		for rewardName, rewardData in pairs(rewardMap) do
+			if (rewardName == "Beli" or rewardName == "Money" or rewardName == "Doubloons")
+				and typeof(rewardData) == "table"
+			then
+				rewardData.Amount = Economy.ScaleAmount(rewardData.Amount)
+				rewardConfig.RewName = "+ " .. CurrencyUtil.formatCurrency(rewardData.Amount)
+			end
+		end
+	end
+end
 
 return Rewards

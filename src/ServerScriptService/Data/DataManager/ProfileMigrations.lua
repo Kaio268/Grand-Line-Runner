@@ -11,6 +11,7 @@ local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChi
 local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local IndexDiscovery = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local TutorialConfigs = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Tutorials"))
+local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local ProfileMigrations = {}
@@ -18,6 +19,8 @@ local ProfileMigrations = {}
 local primaryCurrency = Economy.Currency.Primary
 local CREW_MEMBER_INVENTORY_SCHEMA_VERSION = 2
 local CREW_MEMBER_QUICK_SLOT_SCHEMA_VERSION = 2
+local ECONOMY_INFLATION_VERSION = Economy.GetInflationVersion()
+local ECONOMY_INFLATION_MULTIPLIER = Economy.GetInflationMultiplier()
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -128,22 +131,35 @@ local function normalizeVariantKey(variantKey)
 	return "Normal"
 end
 
-local function buildIncomeRollFields(rarity, variant, instanceData)
+local function buildIncomeRollFields(rarity, variant, instanceData, sourceEconomyVersion)
 	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
 	local normalizedVariant = CrewIncomeBalance.NormalizeVariant(variant)
-	local baseIncomeRoll, incomeRollVersion = CrewIncomeBalance.GetOrMigrateBaseIncome(
+	local baseIncomeRoll = typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil
+	local incomeRollVersion = typeof(instanceData) == "table" and instanceData.IncomeRollVersion or nil
+	local sourceRollVersion = math.floor(tonumber(incomeRollVersion) or 1)
+	local currentRollVersion = CrewIncomeBalance.GetIncomeRollVersion()
+	if
+		(tonumber(sourceEconomyVersion) or 0) < ECONOMY_INFLATION_VERSION
+		and sourceRollVersion >= currentRollVersion
+		and tonumber(baseIncomeRoll) ~= nil
+	then
+		baseIncomeRoll = Economy.ScaleAmount(baseIncomeRoll)
+		incomeRollVersion = currentRollVersion
+	end
+
+	local migratedBaseIncomeRoll, migratedIncomeRollVersion = CrewIncomeBalance.GetOrMigrateBaseIncome(
 		normalizedRarity,
-		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil,
-		typeof(instanceData) == "table" and instanceData.IncomeRollVersion or nil
+		baseIncomeRoll,
+		incomeRollVersion
 	)
 
 	return {
 		Rarity = normalizedRarity,
 		Variant = normalizedVariant,
-		BaseIncomeRoll = baseIncomeRoll,
-		IncomeRollVersion = incomeRollVersion,
+		BaseIncomeRoll = migratedBaseIncomeRoll,
+		IncomeRollVersion = migratedIncomeRollVersion,
 		Income = CrewIncomeBalance.ComputeIncome(
-			baseIncomeRoll,
+			migratedBaseIncomeRoll,
 			normalizedVariant,
 			typeof(instanceData) == "table" and instanceData.Level or nil,
 			normalizedRarity
@@ -182,7 +198,7 @@ local function resolveCrewMemberItemId(storageName, baseName, variantKey)
 	return nil
 end
 
-local function normalizeCrewMemberSourceInstance(instanceId, instanceData, fallbackStorageName)
+local function normalizeCrewMemberSourceInstance(instanceId, instanceData, fallbackStorageName, sourceEconomyVersion)
 	if typeof(instanceData) ~= "table" then
 		instanceData = {}
 	end
@@ -200,7 +216,7 @@ local function normalizeCrewMemberSourceInstance(instanceId, instanceData, fallb
 	if variantKey == "" then
 		variantKey = "Normal"
 	end
-	local incomeFields = buildIncomeRollFields(instanceData.Rarity or "Common", variantKey, instanceData)
+	local incomeFields = buildIncomeRollFields(instanceData.Rarity or "Common", variantKey, instanceData, sourceEconomyVersion)
 
 	return {
 		InstanceId = tostring(instanceId),
@@ -249,7 +265,7 @@ local function resolveLegacyCrewStorageName(storageName, baseName, variantKey)
 	return tostring(storageName or "")
 end
 
-local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackStorageName, projectionSource)
+local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackStorageName, projectionSource, sourceEconomyVersion)
 	if typeof(instanceData) ~= "table" then
 		instanceData = {}
 	end
@@ -303,7 +319,7 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		Overflow = instanceData.Overflow,
 		OverflowSource = instanceData.OverflowSource,
 		OverflowedAt = instanceData.OverflowedAt,
-	}, crewMemberId)
+	}, crewMemberId, sourceEconomyVersion)
 	if not legacyInstance then
 		return nil
 	end
@@ -361,7 +377,7 @@ local function ensureCrewMemberInventoryShape(crewMemberInventory)
 	return crewMemberInventory
 end
 
-local function normalizeCrewMemberInventory(crewMemberInventory)
+local function normalizeCrewMemberInventory(crewMemberInventory, sourceEconomyVersion)
 	crewMemberInventory = ensureCrewMemberInventoryShape(crewMemberInventory)
 
 	local originalById = crewMemberInventory.ById
@@ -378,7 +394,7 @@ local function normalizeCrewMemberInventory(crewMemberInventory)
 		end
 
 		maxInstanceId = math.max(maxInstanceId, coerceNumber(tonumber(instanceId), 0))
-		local normalized = normalizeCrewMemberInstance(instanceId, instanceData, nil, source)
+		local normalized = normalizeCrewMemberInstance(instanceId, instanceData, nil, source, sourceEconomyVersion)
 		if normalized then
 			normalizedById[instanceId] = normalized
 			table.insert(normalizedOrder, instanceId)
@@ -583,11 +599,124 @@ local function migrateLegacyStandLevels(data, sourceLevels)
 	return migrated
 end
 
+local function scaleSavedEconomyNumber(parent, key, scaleCounters)
+	if typeof(parent) ~= "table" or typeof(parent[key]) ~= "number" then
+		return
+	end
+
+	parent[key] = Economy.ScaleAmount(parent[key])
+	scaleCounters.Fields += 1
+end
+
+local function scaleNumericMapValues(map, scaleCounters)
+	if typeof(map) ~= "table" then
+		return
+	end
+
+	for key, value in pairs(map) do
+		if typeof(value) == "number" then
+			map[key] = Economy.ScaleAmount(value)
+			scaleCounters.Fields += 1
+		end
+	end
+end
+
+local function scaleQuestEconomyProgress(quests, scaleCounters)
+	if typeof(quests) ~= "table" then
+		return
+	end
+
+	for _, categoryId in ipairs({ "Daily", "Weekly", "Special" }) do
+		local categoryState = quests[categoryId]
+		local progress = if typeof(categoryState) == "table" then categoryState.Progress else nil
+		if typeof(progress) ~= "table" then
+			continue
+		end
+
+		for questId, value in pairs(progress) do
+			local definition = QuestConfig.GetQuestDefinition(questId)
+			local objective = definition and definition.Objective
+			local objectiveType = tostring(objective and objective.Type or "")
+			if (objectiveType == "EarnBeli" or objectiveType == "EarnDoubloons") and typeof(value) == "number" then
+				progress[questId] = Economy.ScaleAmount(value)
+				scaleCounters.Fields += 1
+			end
+		end
+	end
+end
+
+local function applyEconomyInflationMigration(data, previousVersion)
+	local oldVersion = math.floor(tonumber(previousVersion) or 0)
+	if oldVersion >= ECONOMY_INFLATION_VERSION then
+		data.EconomyVersion = math.max(oldVersion, ECONOMY_INFLATION_VERSION)
+		return false
+	end
+
+	local counters = { Fields = 0 }
+	local leaderstats = ensureTable(data, "leaderstats")
+	local totalStats = ensureTable(data, "TotalStats")
+	local currencyLegacy = ensureTable(data, "CurrencyLegacy")
+
+	scaleSavedEconomyNumber(leaderstats, primaryCurrency.Key, counters)
+	scaleSavedEconomyNumber(totalStats, primaryCurrency.TotalKey, counters)
+	for _, key in ipairs({
+		"CurrentBeli",
+		"CurrentTotalBeli",
+		"Doubloons",
+		"Money",
+		"Moeny",
+		"TotalDoubloons",
+		"TotalMoney",
+		"LeaderstatDoubloons",
+		"LeaderstatMoney",
+		"LeaderstatTypo",
+		"LegacyTotalDoubloons",
+		"LegacyTotalMoney",
+	}) do
+		scaleSavedEconomyNumber(currencyLegacy, key, counters)
+	end
+
+	local materials = ensureTable(data, "Materials")
+	for _, key in ipairs({ "Timber", "Iron", "AncientTimber", "CommonShipMaterial", "RareShipMaterial" }) do
+		scaleSavedEconomyNumber(materials, key, counters)
+	end
+	scaleNumericMapValues(materials.Inventory, counters)
+
+	local crewMemberIncome = ensureTable(data, "CrewMemberIncome")
+	for _, row in pairs(crewMemberIncome) do
+		if typeof(row) == "table" then
+			scaleSavedEconomyNumber(row, "IncomeToCollect", counters)
+		end
+	end
+
+	local ship = ensureTable(data, "Ship")
+	local captainSlot = ensureTable(ship, "CaptainSlot")
+	scaleSavedEconomyNumber(captainSlot, "IncomeToCollect", counters)
+
+	local afk = ensureTable(data, "AFK")
+	local afkSession = ensureTable(afk, "Session")
+	scaleSavedEconomyNumber(afkSession, "BeliRemainder", counters)
+	scaleSavedEconomyNumber(afkSession, "EarnedBeliThisSession", counters)
+
+	scaleQuestEconomyProgress(data.Quests, counters)
+
+	data.EconomyVersion = ECONOMY_INFLATION_VERSION
+	warn(string.format(
+		"[EconomyInflationMigration] migrated profile economyVersion=%d->%d multiplier=%s scaledFields=%d",
+		oldVersion,
+		ECONOMY_INFLATION_VERSION,
+		tostring(ECONOMY_INFLATION_MULTIPLIER),
+		counters.Fields
+	))
+	return true
+end
+
 function ProfileMigrations.Apply(data)
 	if typeof(data) ~= "table" then
 		return
 	end
 
+	local economyVersionBeforeMigration = math.floor(tonumber(data.EconomyVersion) or 0)
 	mergeDefaults(data, ProfileTemplate)
 
 	local leaderstats = ensureTable(data, "leaderstats")
@@ -939,6 +1068,9 @@ function ProfileMigrations.Apply(data)
 	end
 
 	local tutorialStartAmount = coerceNumber(Economy.Tutorial and Economy.Tutorial.StartingBeli, 0)
+	if economyVersionBeforeMigration < ECONOMY_INFLATION_VERSION then
+		tutorialStartAmount = tutorialStartAmount / ECONOMY_INFLATION_MULTIPLIER
+	end
 	if hiddenLeaderstats.TutorialStarterBeliGranted ~= true then
 		if hiddenLeaderstats.Tutorial == true then
 			hiddenLeaderstats.TutorialStarterBeliGranted = true
@@ -1159,7 +1291,7 @@ function ProfileMigrations.Apply(data)
 	end
 	indexCollection.DevilFruits = discoveredDevilFruits
 
-	normalizeCrewMemberInventory(crewMemberInventory)
+	normalizeCrewMemberInventory(crewMemberInventory, economyVersionBeforeMigration)
 	crewMemberQuickSlots.Assignments = normalizeQuickSlotAssignments(crewMemberQuickSlots.Assignments, crewMemberInventory)
 
 	local materials = ensureTable(data, "Materials")
@@ -1235,6 +1367,8 @@ function ProfileMigrations.Apply(data)
 	end
 	crewProtection.PermanentSlotsOwned = math.max(0, math.floor(coerceNumber(crewProtection.PermanentSlotsOwned, 0)))
 	crewProtection.PermanentAssignments = ensureTable(crewProtection, "PermanentAssignments")
+
+	applyEconomyInflationMigration(data, economyVersionBeforeMigration)
 end
 
 return ProfileMigrations

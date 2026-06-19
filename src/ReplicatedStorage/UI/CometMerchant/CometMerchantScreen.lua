@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local e = React.createElement
 
@@ -125,7 +126,7 @@ local function CometMerchantScreen(props)
 			onBuy = function()
 				props.onBuy(offer.fullPath)
 			end,
-			priceText = tostring(offer.price),
+			priceText = CurrencyUtil.formatCurrency(offer.price),
 			stockText = string.format("x%d Stock", offer.stock),
 		})
 	end
