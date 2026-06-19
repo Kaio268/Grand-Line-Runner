@@ -2121,13 +2121,6 @@ local function advanceIfCurrentStep(player, expectedStepId)
 		return false
 	end
 
-	local nextStep = TutorialConfig.GetStep((tonumber(session.stepIndex) or 0) + 1)
-	print(string.format(
-		"[FirstTimeTutorialDebug] advancing player=%s currentStep=%s nextStep=%s objectiveCompleted=true",
-		player.Name,
-		tostring(step.Id or ""),
-		tostring(nextStep and nextStep.Id or "complete")
-	))
 	session.progress = 1
 	session.lastPushedProgress = 1
 	advanceTutorial(player)
@@ -2262,11 +2255,6 @@ end
 StepHandlers.buy_speed.OnStart = function(player, session)
 	session.buySpeedStartValue = getSpeedValue(player)
 	session.buySpeedPurchaseDetected = false
-	print(string.format(
-		"[FirstTimeTutorialDebug] Step4 started player=%s currentStep=buy_speed startSpeed=%s",
-		player.Name,
-		tostring(session.buySpeedStartValue)
-	))
 	if session.buySpeedRecoveryAvailable ~= true and getSpeedValue(player) <= session.buySpeedStartValue then
 		session.buySpeedRecoveryAvailable = canRecoverSpeedUpgradePurchase(player)
 	end
@@ -2277,14 +2265,6 @@ StepHandlers.buy_speed.Update = function(player, session)
 	local startValue = tonumber(session.buySpeedStartValue) or 1
 	local objectiveCompleted = session.buySpeedPurchaseDetected == true or speedValue > startValue
 	if objectiveCompleted then
-		local nextStep = TutorialConfig.GetStep((tonumber(session.stepIndex) or 0) + 1)
-		print(string.format(
-			"[FirstTimeTutorialDebug] Step4 completion detected player=%s currentStep=buy_speed speed=%s startSpeed=%s nextStep=%s",
-			player.Name,
-			tostring(speedValue),
-			tostring(startValue),
-			tostring(nextStep and nextStep.Id or "complete")
-		))
 		advanceTutorial(player)
 		return
 	end
@@ -2344,19 +2324,8 @@ local function onObjectiveRecorded(player, eventData)
 	elseif objectiveType == "BuySpeed" then
 		local session = sessions[player]
 		local step = getCurrentStep(session)
-		print(string.format(
-			"[FirstTimeTutorialDebug] speed upgrade detected player=%s currentStep=%s newSpeed=%s previousSpeed=%s",
-			player.Name,
-			tostring(step and step.Id or ""),
-			tostring(context.NewSpeed),
-			tostring(context.PreviousSpeed)
-		))
 		if step and tostring(step.Id or "") == "buy_speed" then
 			session.buySpeedPurchaseDetected = true
-			print(string.format(
-				"[FirstTimeTutorialDebug] Step4 completion detected player=%s currentStep=buy_speed",
-				player.Name
-			))
 			advanceIfCurrentStep(player, "buy_speed")
 		end
 	end
