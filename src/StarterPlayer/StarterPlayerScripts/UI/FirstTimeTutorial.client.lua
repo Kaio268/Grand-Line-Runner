@@ -16,18 +16,15 @@ local TUTORIAL_GUI_NAME = "FirstTimeTutorialGui"
 local OBJECTIVE_GUI_NAME = "FirstTimeTutorialObjectiveGui"
 local TUTORIAL_GUI_TIMEOUT_SECONDS = 10
 
-local tutorialGui = playerGui:WaitForChild(TUTORIAL_GUI_NAME, TUTORIAL_GUI_TIMEOUT_SECONDS)
-if not tutorialGui or not tutorialGui:IsA("ScreenGui") then
+local tutorialGui = playerGui:FindFirstChild(TUTORIAL_GUI_NAME)
+if not tutorialGui then
+	tutorialGui = playerGui:WaitForChild(TUTORIAL_GUI_NAME, TUTORIAL_GUI_TIMEOUT_SECONDS)
+end
+if tutorialGui and not tutorialGui:IsA("ScreenGui") then
 	if game:GetAttribute("TutorialMissingUiWarnings") == true then
-		warn("[FirstTimeTutorial] Missing PlayerGui.FirstTimeTutorialGui; tutorial UI cannot render.")
+		warn("[FirstTimeTutorial] PlayerGui.FirstTimeTutorialGui is not a ScreenGui; tutorial UI cannot render.")
 	end
 	tutorialGui = nil
-else
-	tutorialGui.DisplayOrder = 180
-	tutorialGui.IgnoreGuiInset = true
-	tutorialGui.ResetOnSpawn = false
-	tutorialGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	tutorialGui.Enabled = false
 end
 
 local objectiveController = TutorialObjectiveIndicatorController.new(playerGui, {
@@ -47,12 +44,17 @@ local stateRemote = nil
 local stateRemoteConnection = nil
 local remotesChildConnection = nil
 local requestedInitialState = false
+local advanceRequestInFlight = false
 local skipRequestInFlight = false
 
 local tutorialRefs = {
 	darkOverlay = nil,
+	firstStepFrame = nil,
+	normalStepsFrame = nil,
+	finalStepFrame = nil,
 	containersByStep = {},
 	stepsByIndex = {},
+	allFrames = {},
 }
 
 local warnedMissingGuiPath = {}
@@ -96,6 +98,36 @@ local function findGuiChild(parent, childName, path)
 	return child
 end
 
+local function findDescendantGuiButtons(parent, buttonName)
+	local buttons = {}
+	if not parent or tostring(buttonName or "") == "" then
+		return buttons
+	end
+
+	for _, descendant in ipairs(parent:GetDescendants()) do
+		if descendant.Name == buttonName and descendant:IsA("GuiButton") then
+			buttons[#buttons + 1] = descendant
+		end
+	end
+
+	return buttons
+end
+
+local function findFirstActionButton(parent, excludedNames)
+	if not parent then
+		return nil
+	end
+
+	excludedNames = excludedNames or {}
+	for _, descendant in ipairs(parent:GetDescendants()) do
+		if descendant:IsA("GuiButton") and not excludedNames[descendant.Name] then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
 local function setVisible(instance, visible)
 	if instance and instance:IsA("GuiObject") then
 		instance.Visible = visible
@@ -119,27 +151,41 @@ local function resolveTutorialGuiRefs()
 	local firstStepFrame = findGuiChild(tutorialGui, "FirstStepFrame", "FirstStepFrame")
 	local normalStepsFrame = findGuiChild(tutorialGui, "NormalStepsFrame", "NormalStepsFrame")
 	local finalStepFrame = findGuiChild(tutorialGui, "FinalStepFrame", "FinalStepFrame")
+	local welcomeStep = resolveStepFrame(firstStepFrame, "WelcomeStep", "FirstStepFrame.WelcomeStep")
+	local step1Crewmate = resolveStepFrame(normalStepsFrame, "Step1_Crewmate", "NormalStepsFrame.Step1_Crewmate")
+	local step2BringHome = resolveStepFrame(normalStepsFrame, "Step2_BringHome", "NormalStepsFrame.Step2_BringHome")
+	local step3CollectBeli = resolveStepFrame(normalStepsFrame, "Step3_CollectBeli", "NormalStepsFrame.Step3_CollectBeli")
+	local step4GetFaster = resolveStepFrame(normalStepsFrame, "Step4_GetFaster", "NormalStepsFrame.Step4_GetFaster")
 
 	tutorialRefs.darkOverlay = findGuiChild(tutorialGui, "DarkOverlay", "DarkOverlay")
+	tutorialRefs.firstStepFrame = firstStepFrame
+	tutorialRefs.normalStepsFrame = normalStepsFrame
+	tutorialRefs.finalStepFrame = finalStepFrame
 	tutorialRefs.containersByStep = {
 		[1] = firstStepFrame,
 		[2] = normalStepsFrame,
 		[3] = normalStepsFrame,
 		[4] = normalStepsFrame,
 		[5] = normalStepsFrame,
-		[6] = normalStepsFrame,
-		[7] = normalStepsFrame,
-		[8] = finalStepFrame,
+		[6] = finalStepFrame,
 	}
 	tutorialRefs.stepsByIndex = {
-		[1] = resolveStepFrame(firstStepFrame, "Step1_Welcome", "FirstStepFrame.Step1_Welcome"),
-		[2] = resolveStepFrame(normalStepsFrame, "Step2_Footing", "NormalStepsFrame.Step2_Footing"),
-		[3] = resolveStepFrame(normalStepsFrame, "Step3_Crewmate", "NormalStepsFrame.Step3_Crewmate"),
-		[4] = resolveStepFrame(normalStepsFrame, "Step4_BringHome", "NormalStepsFrame.Step4_BringHome"),
-		[5] = resolveStepFrame(normalStepsFrame, "Step5_PutToWork", "NormalStepsFrame.Step5_PutToWork"),
-		[6] = resolveStepFrame(normalStepsFrame, "Step6_CollectBeli", "NormalStepsFrame.Step6_CollectBeli"),
-		[7] = resolveStepFrame(normalStepsFrame, "Step7_GetFaster", "NormalStepsFrame.Step7_GetFaster"),
-		[8] = resolveStepFrame(finalStepFrame, "Step8_SetSail", "FinalStepFrame.Step8_SetSail"),
+		[1] = welcomeStep,
+		[2] = step1Crewmate,
+		[3] = step2BringHome,
+		[4] = step3CollectBeli,
+		[5] = step4GetFaster,
+		[6] = finalStepFrame,
+	}
+	tutorialRefs.allFrames = {
+		firstStepFrame,
+		welcomeStep,
+		normalStepsFrame,
+		step1Crewmate,
+		step2BringHome,
+		step3CollectBeli,
+		step4GetFaster,
+		finalStepFrame,
 	}
 end
 
@@ -150,16 +196,8 @@ local function hideTutorialFrames()
 
 	setVisible(tutorialRefs.darkOverlay, false)
 
-	local hiddenContainers = {}
-	for _, container in pairs(tutorialRefs.containersByStep) do
-		if container and not hiddenContainers[container] then
-			hiddenContainers[container] = true
-			setVisible(container, false)
-		end
-	end
-
-	for _, stepFrame in pairs(tutorialRefs.stepsByIndex) do
-		setVisible(stepFrame, false)
+	for _, frame in ipairs(tutorialRefs.allFrames) do
+		setVisible(frame, false)
 	end
 end
 
@@ -183,7 +221,9 @@ local function applyTutorialGuiState(state)
 	hideTutorialFrames()
 	setVisible(tutorialRefs.darkOverlay, true)
 	setVisible(container, true)
-	setVisible(stepFrame, true)
+	if stepFrame ~= container then
+		setVisible(stepFrame, true)
+	end
 end
 
 local requestState
@@ -191,6 +231,7 @@ local refreshRemotes
 local bindRemotesFolder
 local requestAdvance
 local requestSkip
+local scheduleRender
 
 local function connectButton(button, callback)
 	if button and button:IsA("GuiButton") then
@@ -198,7 +239,7 @@ local function connectButton(button, callback)
 	end
 end
 
-local function findButton(stepFrame, buttonName, path)
+local function findButtonInButtonFrame(stepFrame, buttonName, path)
 	local buttonFrame = findGuiChild(stepFrame, "ButtonFrame", path .. ".ButtonFrame")
 	local button = findGuiChild(buttonFrame, buttonName, path .. ".ButtonFrame." .. buttonName)
 	if button and not button:IsA("GuiButton") then
@@ -208,49 +249,72 @@ local function findButton(stepFrame, buttonName, path)
 	return button
 end
 
+local function connectButtonOnce(connectedButtons, button, callback)
+	if not button or connectedButtons[button] == true then
+		return
+	end
+
+	connectedButtons[button] = true
+	connectButton(button, callback)
+end
+
+local function connectSkipButton(connectedButtons, stepFrame)
+	for _, skipButton in ipairs(findDescendantGuiButtons(stepFrame, "SkipButton")) do
+		connectButtonOnce(connectedButtons, skipButton, function()
+			requestSkip()
+		end)
+	end
+end
+
 local function connectTutorialButtons()
 	disconnectButtonConnections()
 	if not tutorialGui then
 		return
 	end
 
-	local step1 = tutorialRefs.stepsByIndex[1]
-	connectButton(findButton(step1, "StartButton", "FirstStepFrame.Step1_Welcome"), function()
-		requestAdvance()
-	end)
-	connectButton(findButton(step1, "SkipButton", "FirstStepFrame.Step1_Welcome"), function()
-		requestSkip()
-	end)
+	local connectedButtons = {}
+	local welcomeStep = tutorialRefs.stepsByIndex[1]
+	connectButtonOnce(
+		connectedButtons,
+		findButtonInButtonFrame(welcomeStep, "StartTutorialButton", "FirstStepFrame.WelcomeStep"),
+		function()
+			requestAdvance()
+		end
+	)
+	connectSkipButton(connectedButtons, welcomeStep)
 
-	for stepIndex = 2, 7 do
-		local stepFrame = tutorialRefs.stepsByIndex[stepIndex]
-		local pathByStep = {
-			[2] = "NormalStepsFrame.Step2_Footing",
-			[3] = "NormalStepsFrame.Step3_Crewmate",
-			[4] = "NormalStepsFrame.Step4_BringHome",
-			[5] = "NormalStepsFrame.Step5_PutToWork",
-			[6] = "NormalStepsFrame.Step6_CollectBeli",
-			[7] = "NormalStepsFrame.Step7_GetFaster",
-		}
-		local path = pathByStep[stepIndex]
-
-		connectButton(findButton(stepFrame, "MoveToContinueButton", path), function()
-			if tutorialState and tutorialState.canAdvance == true then
-				requestAdvance()
-			end
-		end)
-		connectButton(findButton(stepFrame, "SkipButton", path), function()
-			requestSkip()
-		end)
+	for stepIndex = 2, 5 do
+		connectSkipButton(connectedButtons, tutorialRefs.stepsByIndex[stepIndex])
 	end
 
-	local step8 = tutorialRefs.stepsByIndex[8]
-	connectButton(findButton(step8, "FinishButton", "FinalStepFrame.Step8_SetSail"), function()
+	local finalStep = tutorialRefs.stepsByIndex[6]
+	local finalButton = findFirstActionButton(finalStep, {
+		SkipButton = true,
+	})
+	connectButtonOnce(connectedButtons, finalButton, function()
 		requestAdvance()
 	end)
-	connectButton(findButton(step8, "SkipButton", "FinalStepFrame.Step8_SetSail"), function()
-		requestSkip()
-	end)
+	connectSkipButton(connectedButtons, finalStep)
+end
+
+local function initializeTutorialGui(nextGui)
+	if not nextGui or not nextGui:IsA("ScreenGui") then
+		return false
+	end
+
+	tutorialGui = nextGui
+	tutorialGui.DisplayOrder = 180
+	tutorialGui.IgnoreGuiInset = true
+	tutorialGui.ResetOnSpawn = false
+	tutorialGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	tutorialGui.Enabled = false
+
+	resolveTutorialGuiRefs()
+	hideTutorialFrames()
+	connectTutorialButtons()
+	scheduleRender()
+
+	return true
 end
 
 local function renderObjectiveIndicator(state)
@@ -267,7 +331,7 @@ local function renderObjectiveIndicator(state)
 	end
 end
 
-local function scheduleRender()
+scheduleRender = function()
 	if renderQueued or destroyed then
 		return
 	end
@@ -288,6 +352,12 @@ requestSkip = function()
 	if skipRequestInFlight then
 		return
 	end
+
+	hideTutorialFrames()
+	if tutorialGui then
+		tutorialGui.Enabled = false
+	end
+	objectiveController:Clear()
 
 	if not requestRemote then
 		PopUpModule:Local_SendPopUp("Tutorial service is starting.", Color3.fromRGB(255, 104, 104), Color3.fromRGB(0, 0, 0), 3, true)
@@ -314,14 +384,20 @@ requestSkip = function()
 end
 
 requestAdvance = function()
+	if advanceRequestInFlight then
+		return
+	end
+
 	if not requestRemote then
 		PopUpModule:Local_SendPopUp("Tutorial service is starting.", Color3.fromRGB(255, 104, 104), Color3.fromRGB(0, 0, 0), 3, true)
 		return
 	end
 
+	advanceRequestInFlight = true
 	local ok, response = pcall(function()
 		return requestRemote:InvokeServer("Advance")
 	end)
+	advanceRequestInFlight = false
 
 	if ok and typeof(response) == "table" then
 		if typeof(response.state) == "table" then
@@ -421,9 +497,15 @@ bindRemotesFolder = function(folder)
 	refreshRemotes()
 end
 
-resolveTutorialGuiRefs()
-hideTutorialFrames()
-connectTutorialButtons()
+if not initializeTutorialGui(tutorialGui) and game:GetAttribute("TutorialMissingUiWarnings") == true then
+	warn("[FirstTimeTutorial] Missing PlayerGui.FirstTimeTutorialGui; tutorial UI cannot render.")
+end
+
+table.insert(cleanupConnections, playerGui.ChildAdded:Connect(function(child)
+	if child.Name == TUTORIAL_GUI_NAME and child:IsA("ScreenGui") then
+		initializeTutorialGui(child)
+	end
+end))
 
 local existingRemotes = ReplicatedStorage:FindFirstChild("Remotes")
 if existingRemotes then
@@ -435,16 +517,6 @@ table.insert(cleanupConnections, ReplicatedStorage.ChildAdded:Connect(function(c
 		bindRemotesFolder(child)
 	end
 end))
-
-task.spawn(function()
-	while not destroyed and (not requestRemote or not stateRemote) do
-		local folder = ReplicatedStorage:FindFirstChild("Remotes")
-		if folder then
-			bindRemotesFolder(folder)
-		end
-		task.wait(1)
-	end
-end)
 
 script.Destroying:Connect(function()
 	destroyed = true

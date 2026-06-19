@@ -1390,6 +1390,16 @@ ObjectiveTargetResolvers.place_on_stand = function(player, session)
 	return target
 end
 
+ObjectiveTargetResolvers.collect_beli = function(player, session)
+	local standName = getPlacedTutorialStandName(player, session)
+	local standModel = findOwnedStandModel(player, standName)
+	if standModel then
+		return buildStandObjectiveTarget(player, standModel)
+	end
+
+	return nil
+end
+
 ObjectiveTargetResolvers.buy_speed = function(player, _session)
 	return selectNearestSpeedUpgradeObjectiveTarget(player)
 end
@@ -1894,6 +1904,44 @@ local function advanceIfCurrentStep(player, expectedStepId)
 	return true
 end
 
+local function tryAdvanceTutorialPlacement(player, context)
+	local session = sessions[player]
+	if not session or session.active ~= true then
+		return false
+	end
+
+	local step = getCurrentStep(session)
+	if not step or tostring(step.Id or "") ~= "place_on_stand" then
+		return false
+	end
+	if typeof(context) ~= "table" or context.TutorialPlacement ~= true then
+		return false
+	end
+
+	local source = tostring(context.Source or "")
+	if source ~= "StandPlacement" and source ~= "CaptainPlacement" then
+		return false
+	end
+
+	local standName = tostring(context.StandName or "")
+	local instanceId = tostring(context.CrewMemberInstanceId or "")
+	if standName == "" or instanceId == "" then
+		return false
+	end
+
+	session.placedTutorialStandName = standName
+	session.placedTutorialInstanceId = instanceId
+	session.placedTutorialCrewMemberName = tostring(context.CrewMemberName or "")
+
+	-- Step 2 must follow the server-authoritative placement state, not the earlier inventory grant.
+	if not hasPlacedTutorialCrewMember(player, session) then
+		pushState(player)
+		return false
+	end
+
+	return advanceIfCurrentStep(player, "place_on_stand")
+end
+
 local function updateMoveDistanceStep(player, session, step)
 	local position = getRootPosition(player)
 	if not position then
@@ -1929,17 +1977,13 @@ StepHandlers.pickup_crew_member.OnStart = function(player, session)
 end
 
 StepHandlers.pickup_crew_member.Update = function(player, session)
-	if isHoldingTutorialTarget(player, session) then
-		advanceTutorial(player)
-		return
-	end
 	if hasTutorialReward(player, session) then
 		advanceTutorial(player)
 		return
 	end
 
 	ensureTutorialCrewMemberTarget(player, session)
-	setProgress(player, session, 0)
+	setProgress(player, session, if isHoldingTutorialTarget(player, session) then 0.5 else 0)
 end
 
 StepHandlers.extract_crew_member.OnStart = function(player, session)
@@ -2040,17 +2084,12 @@ local function onObjectiveRecorded(player, eventData)
 		local session = sessions[player]
 		local eventToken = tostring(context.TutorialToken or "")
 		if session and (eventToken == tostring(session.tutorialToken or "") or hasTutorialReward(player, session)) then
-			advanceIfCurrentStep(player, "extract_crew_member")
+			if not advanceIfCurrentStep(player, "pickup_crew_member") then
+				advanceIfCurrentStep(player, "extract_crew_member")
+			end
 		end
-	elseif objectiveType == "PlaceOnStand" and source == "StandPlacement" and context.TutorialPlacement == true then
-		local session = sessions[player]
-		local standName = tostring(context.StandName or "")
-		if session and standName ~= "" then
-			session.placedTutorialStandName = standName
-			session.placedTutorialInstanceId = tostring(context.CrewMemberInstanceId or "")
-			session.placedTutorialCrewMemberName = tostring(context.CrewMemberName or "")
-			advanceIfCurrentStep(player, "place_on_stand")
-		end
+	elseif objectiveType == "PlaceOnStand" then
+		tryAdvanceTutorialPlacement(player, context)
 	elseif (objectiveType == "EarnBeli" or objectiveType == "EarnDoubloons") and source == "StandIncome" then
 		local session = sessions[player]
 		if session and isTutorialCrewMemberOnStand(player, session, context.StandName) then
