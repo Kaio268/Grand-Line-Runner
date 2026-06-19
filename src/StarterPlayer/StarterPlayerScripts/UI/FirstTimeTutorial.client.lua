@@ -211,6 +211,10 @@ end
 local function cleanupCompletedTutorialUi()
 	hideTutorialFrames()
 	if tutorialGui then
+		local darkOverlay = tutorialGui:FindFirstChild("DarkOverlay")
+		if darkOverlay and darkOverlay:IsA("GuiObject") then
+			darkOverlay.Visible = false
+		end
 		tutorialGui.Enabled = false
 	end
 	objectiveController:Clear()
