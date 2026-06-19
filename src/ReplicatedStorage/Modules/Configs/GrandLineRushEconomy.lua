@@ -123,21 +123,27 @@ local Economy = {
 				SpawnCheckInterval = 5,
 				RespawnCheckInterval = 5, -- Legacy alias; prefer SpawnCheckInterval.
 				SpawnIntervalSeconds = {
-					Base = 42,
-					SecondsRemovedPerExtraPlayer = 5,
-					Min = 22,
-					Max = 42,
+					Base = 34,
+					SecondsRemovedPerExtraPlayer = 4,
+					Min = 18,
+					Max = 34,
 				},
 				RespawnDelay = 75, -- Legacy fallback for older shared chest code.
 				MaxActiveByPlayerCount = {
-					[1] = 12,
-					[2] = 14,
-					[3] = 16,
-					[4] = 18,
-					[5] = 20,
-					[6] = 22,
-					[7] = 24,
-					[8] = 24,
+					[1] = 14,
+					[2] = 16,
+					[3] = 18,
+					[4] = 20,
+					[5] = 22,
+					[6] = 24,
+					[7] = 26,
+					[8] = 26,
+				},
+				MinActiveByDepthBand = {
+					Shallow = 3,
+					Mid = 3,
+					Deep = 2,
+					Abyssal = 2,
 				},
 				MaxActive = {
 					Base = 4,
@@ -390,11 +396,11 @@ local Economy = {
 		Tiers = {
 			Wooden = {
 				DepthBand = "Early",
-				AverageFoodXP = 53,
+				AverageFoodXP = 66,
 				Rewards = {
 					Food = {
-						Apple = { Min = 3, Max = 6 },
-						Rice = { Min = 1, Max = 3 },
+						Apple = { Min = 4, Max = 8 },
+						Rice = { Min = 2, Max = 4 },
 					},
 					Beli = { Min = 250, Max = 600 },
 					FruitConversionBeli = 15,
@@ -407,8 +413,8 @@ local Economy = {
 						Rolls = 1,
 						Pool = {
 							{ Materials = { Iron = 1 } },
-							{ Food = { Apple = 3 } },
-							{ Food = { Rice = 2 } },
+							{ Food = { Apple = 4 } },
+							{ Food = { Rice = 3 } },
 							{ Beli = 300 },
 						},
 					},
@@ -416,11 +422,11 @@ local Economy = {
 			},
 			Iron = {
 				DepthBand = "EarlyMid",
-				AverageFoodXP = 135,
+				AverageFoodXP = 169,
 				Rewards = {
 					Food = {
-						Rice = { Min = 3, Max = 5 },
-						Meat = { Min = 1, Max = 2 },
+						Rice = { Min = 4, Max = 7 },
+						Meat = { Min = 2, Max = 3 },
 					},
 					Beli = { Min = 1000, Max = 2500 },
 					FruitConversionBeli = 30,
@@ -434,7 +440,7 @@ local Economy = {
 						Pool = {
 							{ Materials = { Iron = 6 } },
 							{ Materials = { AncientTimber = 1 } },
-							{ Food = { Meat = 2 } },
+							{ Food = { Meat = 3 } },
 							{ Beli = 1500 },
 						},
 					},
@@ -442,11 +448,11 @@ local Economy = {
 			},
 			Gold = {
 				DepthBand = "Deep",
-				AverageFoodXP = 463,
+				AverageFoodXP = 579,
 				Rewards = {
 					Food = {
-						Meat = { Min = 3, Max = 5 },
-						SeaBeastMeat = { Min = 1, Max = 2 },
+						Meat = { Min = 4, Max = 7 },
+						SeaBeastMeat = { Min = 2, Max = 3 },
 					},
 					Beli = { Min = 4000, Max = 8000 },
 					FruitConversionBeli = 120,
@@ -461,7 +467,7 @@ local Economy = {
 						Pool = {
 							{ Materials = { Iron = 10 } },
 							{ Materials = { AncientTimber = 2 } },
-							{ Food = { SeaBeastMeat = 2 } },
+							{ Food = { SeaBeastMeat = 3 } },
 							{ Beli = 5000 },
 						},
 					},
@@ -471,40 +477,40 @@ local Economy = {
 
 		ExpectedTierDistributionByStage = {
 			Shallow = {
-				Wooden = 76,
+				Wooden = 74,
 				Iron = 21,
-				Gold = 3,
+				Gold = 5,
 			},
 			Mid = {
-				Wooden = 45,
+				Wooden = 41,
 				Iron = 47,
-				Gold = 8,
+				Gold = 12,
 			},
 			Deep = {
 				Wooden = 0,
-				Iron = 82,
-				Gold = 18,
+				Iron = 73,
+				Gold = 27,
 			},
 			Abyssal = {
 				Wooden = 0,
-				Iron = 72,
-				Gold = 28,
+				Iron = 58,
+				Gold = 42,
 			},
 			-- Legacy stage aliases kept for compatibility with older callers.
 			Early = {
-				Wooden = 76,
+				Wooden = 74,
 				Iron = 21,
-				Gold = 3,
+				Gold = 5,
 			},
 			Strong = {
 				Wooden = 0,
-				Iron = 82,
-				Gold = 18,
+				Iron = 73,
+				Gold = 27,
 			},
 			Elite = {
 				Wooden = 0,
-				Iron = 72,
-				Gold = 28,
+				Iron = 58,
+				Gold = 42,
 			},
 		},
 	},

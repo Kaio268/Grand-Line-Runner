@@ -1456,6 +1456,19 @@ local function countActiveSharedChestsOnSpawnPart(spawnPart)
 	return count
 end
 
+local function getActiveSharedChestCountsByDepthBand()
+	local counts = {}
+	for _, node in pairs(sharedChestNodesById) do
+		if node.Object and node.Object.Parent then
+			local rewardState = if typeof(node.RewardState) == "table" then node.RewardState else {}
+			local depthBand = tostring(rewardState.DepthBand or Economy.VerticalSlice.DefaultDepthBand)
+			counts[depthBand] = (counts[depthBand] or 0) + 1
+		end
+	end
+
+	return counts
+end
+
 local function isSharedChestSpawnPartBelowCap(spawnPart, sharedConfig)
 	local maxActivePerSpawnPart = getSharedChestMaxActivePerSpawnPart(sharedConfig)
 	if maxActivePerSpawnPart <= 0 then
@@ -1463,6 +1476,61 @@ local function isSharedChestSpawnPartBelowCap(spawnPart, sharedConfig)
 	end
 
 	return countActiveSharedChestsOnSpawnPart(spawnPart) < maxActivePerSpawnPart
+end
+
+local function getSharedChestMinActiveForDepthBand(sharedConfig, depthBand)
+	local minActiveByDepthBand = sharedConfig.MinActiveByDepthBand
+	if typeof(minActiveByDepthBand) ~= "table" then
+		return 0
+	end
+
+	return math.max(0, math.floor(tonumber(minActiveByDepthBand[tostring(depthBand or "")]) or 0))
+end
+
+local function getUnderfilledSharedChestDepthBand(sharedConfig, activeByDepthBand, records)
+	local hasSpawnCandidateByDepthBand = {}
+	for _, record in ipairs(records) do
+		hasSpawnCandidateByDepthBand[tostring(record.DepthBand or "")] = true
+	end
+
+	local bestDepthBand = nil
+	local bestDeficit = 0
+	for _, configuredDepthBand in ipairs(Economy.VerticalSlice.DepthBands or {}) do
+		local depthBand = tostring(configuredDepthBand)
+		local minActive = getSharedChestMinActiveForDepthBand(sharedConfig, depthBand)
+		if minActive > 0 and hasSpawnCandidateByDepthBand[depthBand] then
+			local activeCount = math.max(0, math.floor(tonumber(activeByDepthBand[depthBand]) or 0))
+			local deficit = minActive - activeCount
+			if deficit > bestDeficit then
+				bestDepthBand = depthBand
+				bestDeficit = deficit
+			end
+		end
+	end
+
+	return bestDepthBand
+end
+
+local function chooseWeightedSharedChestSpawnRecord(records)
+	local totalWeight = 0
+	for _, record in ipairs(records) do
+		totalWeight += math.max(0, tonumber(record.Weight) or 0)
+	end
+
+	if totalWeight <= 0 then
+		return nil
+	end
+
+	local roll = worldRandom:NextNumber(0, totalWeight)
+	local cursor = 0
+	for _, record in ipairs(records) do
+		cursor += math.max(0, tonumber(record.Weight) or 0)
+		if roll <= cursor then
+			return record
+		end
+	end
+
+	return records[#records]
 end
 
 local function chooseSharedChestPlacementCrewMember(spawnPart)
@@ -1488,33 +1556,38 @@ end
 local function chooseSharedChestSpawnRecord(sharedConfig)
 	local records = getSharedChestSpawnPartRecords(sharedConfig)
 	local weightedRecords = {}
-	local totalWeight = 0
 
 	for _, record in ipairs(records) do
 		local spawnPart = record.SpawnPart
 		if spawnPart and spawnPart.Parent and isSharedChestSpawnPartBelowCap(spawnPart, sharedConfig) then
 			local weight = math.max(0, tonumber(record.Weight) or 0)
 			if weight > 0 then
-				totalWeight += weight
 				weightedRecords[#weightedRecords + 1] = record
 			end
 		end
 	end
 
-	if totalWeight <= 0 then
+	if #weightedRecords <= 0 then
 		return nil
 	end
 
-	local roll = worldRandom:NextNumber(0, totalWeight)
-	local cursor = 0
-	for _, record in ipairs(weightedRecords) do
-		cursor += math.max(0, tonumber(record.Weight) or 0)
-		if roll <= cursor then
-			return record
+	local activeByDepthBand = getActiveSharedChestCountsByDepthBand()
+	local underfilledDepthBand = getUnderfilledSharedChestDepthBand(sharedConfig, activeByDepthBand, weightedRecords)
+	if underfilledDepthBand then
+		local underfilledRecords = {}
+		for _, record in ipairs(weightedRecords) do
+			if tostring(record.DepthBand or "") == underfilledDepthBand then
+				underfilledRecords[#underfilledRecords + 1] = record
+			end
+		end
+
+		local underfilledRecord = chooseWeightedSharedChestSpawnRecord(underfilledRecords)
+		if underfilledRecord then
+			return underfilledRecord
 		end
 	end
 
-	return weightedRecords[#weightedRecords]
+	return chooseWeightedSharedChestSpawnRecord(weightedRecords)
 end
 
 local function chooseSharedChestSpawnContext()
