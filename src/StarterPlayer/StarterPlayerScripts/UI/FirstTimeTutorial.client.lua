@@ -55,6 +55,7 @@ local tutorialRefs = {
 	firstStepFrame = nil,
 	normalStepsFrame = nil,
 	finalStepFrame = nil,
+	finalRewardFrame = nil,
 	containersByStep = {},
 	stepsByIndex = {},
 	allFrames = {},
@@ -157,7 +158,12 @@ local function resolveTutorialGuiRefs()
 
 	local firstStepFrame = findGuiChild(tutorialGui, "FirstStepFrame", "FirstStepFrame")
 	local normalStepsFrame = findGuiChild(tutorialGui, "NormalStepsFrame", "NormalStepsFrame")
-	local finalStepFrame = findGuiChild(tutorialGui, "FinalStepFrame", "FinalStepFrame")
+	local finalStepFrame = tutorialGui:FindFirstChild("FinalStepFrame")
+	if finalStepFrame and not finalStepFrame:IsA("GuiObject") then
+		warnMissingGuiPath("FinalStepFrame (not a GuiObject)")
+		finalStepFrame = nil
+	end
+	local finalRewardFrame = findGuiChild(tutorialGui, "StepFinalReward", "StepFinalReward")
 	local welcomeStep = resolveStepFrame(firstStepFrame, "WelcomeStep", "FirstStepFrame.WelcomeStep")
 	local step1Crewmate = resolveStepFrame(normalStepsFrame, "Step1_Crewmate", "NormalStepsFrame.Step1_Crewmate")
 	local step2BringHome = resolveStepFrame(normalStepsFrame, "Step2_BringHome", "NormalStepsFrame.Step2_BringHome")
@@ -168,13 +174,14 @@ local function resolveTutorialGuiRefs()
 	tutorialRefs.firstStepFrame = firstStepFrame
 	tutorialRefs.normalStepsFrame = normalStepsFrame
 	tutorialRefs.finalStepFrame = finalStepFrame
+	tutorialRefs.finalRewardFrame = finalRewardFrame
 	tutorialRefs.containersByStep = {
 		[1] = firstStepFrame,
 		[2] = normalStepsFrame,
 		[3] = normalStepsFrame,
 		[4] = normalStepsFrame,
 		[5] = normalStepsFrame,
-		[6] = finalStepFrame,
+		[6] = finalRewardFrame,
 	}
 	tutorialRefs.stepsByIndex = {
 		[1] = welcomeStep,
@@ -182,7 +189,7 @@ local function resolveTutorialGuiRefs()
 		[3] = step2BringHome,
 		[4] = step3CollectBeli,
 		[5] = step4GetFaster,
-		[6] = finalStepFrame,
+		[6] = finalRewardFrame,
 	}
 	tutorialRefs.allFrames = {
 		firstStepFrame,
@@ -193,6 +200,7 @@ local function resolveTutorialGuiRefs()
 		step3CollectBeli,
 		step4GetFaster,
 		finalStepFrame,
+		finalRewardFrame,
 	}
 end
 
@@ -248,6 +256,7 @@ local requestState
 local refreshRemotes
 local bindRemotesFolder
 local requestAdvance
+local requestClaimRewards
 local requestSkip
 local scheduleRender
 
@@ -319,6 +328,17 @@ local function connectButtonOnce(connectedButtons, button, callback)
 	connectButton(button, callback)
 end
 
+local function findFinalRewardButton(stepFrame)
+	local claimRewards = findGuiChild(stepFrame, "ClaimRewards", "StepFinalReward.ClaimRewards")
+	local buttonFrame = findGuiChild(claimRewards, "ButtonFrame", "StepFinalReward.ClaimRewards.ButtonFrame")
+	local button = findGuiChild(buttonFrame, "SetSailButton", "StepFinalReward.ClaimRewards.ButtonFrame.SetSailButton")
+	if button and not button:IsA("GuiButton") then
+		warnMissingGuiPath("StepFinalReward.ClaimRewards.ButtonFrame.SetSailButton (not a GuiButton)")
+		return nil
+	end
+	return button
+end
+
 local function connectSkipButton(connectedButtons, stepFrame)
 	for _, skipButton in ipairs(findDescendantGuiButtons(stepFrame, "SkipButton")) do
 		connectButtonOnce(connectedButtons, skipButton, function()
@@ -348,14 +368,10 @@ local function connectTutorialButtons()
 		connectSkipButton(connectedButtons, tutorialRefs.stepsByIndex[stepIndex])
 	end
 
-	local finalStep = tutorialRefs.stepsByIndex[6]
-	local finalButton = findFirstActionButton(finalStep, {
-		SkipButton = true,
-	})
-	connectButtonOnce(connectedButtons, finalButton, function()
-		requestAdvance()
+	local finalRewardStep = tutorialRefs.stepsByIndex[6]
+	connectButtonOnce(connectedButtons, findFinalRewardButton(finalRewardStep), function()
+		requestClaimRewards()
 	end)
-	connectSkipButton(connectedButtons, finalStep)
 end
 
 local function initializeTutorialGui(nextGui)
@@ -472,6 +488,36 @@ requestAdvance = function()
 		end
 	else
 		PopUpModule:Local_SendPopUp("Tutorial request failed.", Color3.fromRGB(255, 104, 104), Color3.fromRGB(0, 0, 0), 3, true)
+	end
+end
+
+requestClaimRewards = function()
+	if advanceRequestInFlight then
+		return
+	end
+
+	if not requestRemote then
+		PopUpModule:Local_SendPopUp("Tutorial service is starting.", Color3.fromRGB(255, 104, 104), Color3.fromRGB(0, 0, 0), 3, true)
+		return
+	end
+
+	advanceRequestInFlight = true
+	local ok, response = pcall(function()
+		return requestRemote:InvokeServer("ClaimCompletionRewards")
+	end)
+	advanceRequestInFlight = false
+
+	if ok and typeof(response) == "table" then
+		if typeof(response.state) == "table" then
+			tutorialState = response.state
+			scheduleRender()
+		end
+		local stateWarning = if typeof(response.state) == "table" then tostring(response.state.warning or "") else ""
+		if response.success ~= true and response.message and tostring(response.message) ~= stateWarning then
+			PopUpModule:Local_SendPopUp(tostring(response.message), Color3.fromRGB(255, 104, 104), Color3.fromRGB(0, 0, 0), 3, true)
+		end
+	else
+		PopUpModule:Local_SendPopUp("Tutorial reward claim failed.", Color3.fromRGB(255, 104, 104), Color3.fromRGB(0, 0, 0), 3, true)
 	end
 end
 

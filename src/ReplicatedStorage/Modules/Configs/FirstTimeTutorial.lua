@@ -9,6 +9,15 @@ local FirstTimeTutorial = {
 		SpawnLifetime = 900,
 	},
 
+	CompletionRewards = {
+		ClaimedPath = "HiddenLeaderstats.TutorialFinalRewardsClaimed",
+		TitleId = "RookieCaptain",
+		Chest = {
+			ChestKind = "DevilFruit",
+			Source = "TutorialCompletion",
+		},
+	},
+
 	Remotes = {
 		RequestName = "FirstTimeTutorialRequest",
 		StateName = "FirstTimeTutorialState",
@@ -56,12 +65,12 @@ local FirstTimeTutorial = {
 			CompletionMode = "BuySpeed",
 		},
 		{
-			Id = "final_guidance",
-			Title = "Set sail",
-			Body = "Keep collecting Crewmates, opening chests, completing quests, and pushing deeper into runs.",
-			Instruction = "You are ready to play.",
-			ActionText = "Finish",
-			CompletionMode = "Acknowledge",
+			Id = "final_rewards",
+			Title = "Claim rewards",
+			Body = "Your first voyage is ready.",
+			Instruction = "Claim your tutorial rewards.",
+			ActionText = "Claim Rewards",
+			CompletionMode = "ClaimRewards",
 		},
 	},
 }

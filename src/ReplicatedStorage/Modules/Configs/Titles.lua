@@ -212,6 +212,7 @@ local TITLE_GROUPS = {
 		Order = {
 			"Tester",
 			"Deckhand",
+			"RookieCaptain",
 			"FirstMate",
 			"ChestCracker",
 		},
@@ -250,6 +251,12 @@ local TITLE_GROUPS = {
 				DisplayName = "Deckhand",
 				Description = "Every captain starts somewhere, even if it is just learning where the deck ends and the sea begins.",
 				RequirementText = "Join the game and claim your starter crew.",
+				UnlockType = "Persistent",
+			},
+			RookieCaptain = {
+				DisplayName = "Rookie Captain",
+				Description = "You learned the ropes, claimed your first reward, and set sail for the Grand Line.",
+				RequirementText = "Complete the first-time tutorial.",
 				UnlockType = "Persistent",
 			},
 			FirstMate = {

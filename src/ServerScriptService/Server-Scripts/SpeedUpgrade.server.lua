@@ -10,6 +10,7 @@ local SpeedUpgrade = require(
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local QuestSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushQuestSignals"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local PlayerMovementSpeedService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("PlayerMovementSpeedService"))
 local SpeedUpgradeLimits = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("SpeedUpgradeLimits"))
@@ -260,6 +261,13 @@ local function handleSpeedUpgrade(player, upgradeName)
 		))
 	end
 	PlayerMovementSpeedService.ApplyPlayerSpeed(player, "speed_upgrade_purchase")
+	QuestSignals.Record(player, "BuySpeed", 1, {
+		Source = "SpeedUpgrade",
+		UpgradeIndex = idx,
+		PreviousSpeed = speedVal,
+		NewSpeed = newSpeed,
+		AppliedIncrease = appliedIncrease,
+	})
 end
 
 remote.OnServerEvent:Connect(function(player, upgradeName)

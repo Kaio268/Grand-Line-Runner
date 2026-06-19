@@ -21,6 +21,7 @@ local ProfileTemplate = {
 		TutorialCrewMemberGranted = false,
 		TutorialSpeedTopUpGranted = false,
 		TutorialStarterBeliGranted = false,
+		TutorialFinalRewardsClaimed = false,
 		ClaimedTolilola = false,
 		LimitedReward = false,
 		Group = false,

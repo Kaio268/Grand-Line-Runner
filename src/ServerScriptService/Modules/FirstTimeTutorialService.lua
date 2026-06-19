@@ -17,8 +17,11 @@ local QuestSignals = require(ServerScriptService:WaitForChild("Modules"):WaitFor
 local ShipRuntimeSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeSignals"))
 local ShipRuntimeService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeService"))
 local ShipSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipSlotService"))
+local TitleService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
 local CrewInteraction = require(ServerCrewModules:WaitForChild("Interaction"))
 local CrewRegistry = require(ServerCrewModules:WaitForChild("Registry"))
+local ChestRewards = require(Configs:WaitForChild("GrandLineRushChestRewards"))
+local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local Economy = require(Configs:WaitForChild("GrandLineRushEconomy"))
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
@@ -43,6 +46,13 @@ local TUTORIAL_CREW_MEMBER_GRANTED_PATH = tostring(
 		or "HiddenLeaderstats.TutorialCrewMemberGranted"
 )
 local TUTORIAL_SPEED_TOP_UP_GRANTED_PATH = "HiddenLeaderstats.TutorialSpeedTopUpGranted"
+local TUTORIAL_FINAL_REWARD_CLAIMED_PATH = tostring(
+	(TutorialConfig.CompletionRewards and TutorialConfig.CompletionRewards.ClaimedPath)
+		or "HiddenLeaderstats.TutorialFinalRewardsClaimed"
+)
+local TUTORIAL_COMPLETION_TITLE_ID = tostring(
+	(TutorialConfig.CompletionRewards and TutorialConfig.CompletionRewards.TitleId) or "RookieCaptain"
+)
 local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
 local TUTORIAL_CREW_MEMBER_ATTRIBUTE = "TutorialCrewMember"
 local TUTORIAL_TOKEN_ATTRIBUTE = "TutorialToken"
@@ -60,11 +70,13 @@ local heartbeatConnection
 local questSignalConnection
 local sessions = {}
 local playerConnections = {}
+local rewardClaimsInFlight = {}
 local objectiveCheckAccumulator = 0
 local registryEntries = nil
 local contextualTutorialTriggerService = nil
 
 local cleanupTutorialTarget
+local ensureSession
 
 local function getContextualTutorialTriggerService()
 	if contextualTutorialTriggerService ~= nil then
@@ -139,8 +151,8 @@ local StepHandlers = {
 	buy_speed = {
 		AllowClientAdvance = false,
 	},
-	final_guidance = {
-		AllowClientAdvance = true,
+	final_rewards = {
+		AllowClientAdvance = false,
 	},
 }
 
@@ -192,6 +204,7 @@ local function disconnectPlayer(player)
 
 	playerConnections[player] = nil
 	sessions[player] = nil
+	rewardClaimsInFlight[player] = nil
 end
 
 local function getTutorialValueObject(player)
@@ -1581,6 +1594,168 @@ local function sendPopup(player, text, isError)
 	)
 end
 
+local function deepCopy(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local copy = {}
+	for key, child in pairs(value) do
+		copy[deepCopy(key)] = deepCopy(child)
+	end
+	return copy
+end
+
+local function normalizeChestCount(value)
+	return math.max(0, math.floor((tonumber(value) or 0) + 0.5))
+end
+
+local function ensureUnopenedChests(unopenedChests)
+	unopenedChests = if typeof(unopenedChests) == "table" then unopenedChests else {}
+	unopenedChests.ById = if typeof(unopenedChests.ById) == "table" then unopenedChests.ById else {}
+	unopenedChests.Order = if typeof(unopenedChests.Order) == "table" then unopenedChests.Order else {}
+	unopenedChests.Stacks = if typeof(unopenedChests.Stacks) == "table" then unopenedChests.Stacks else {}
+	unopenedChests.NextChestId = math.max(1, math.floor(tonumber(unopenedChests.NextChestId) or 1))
+	unopenedChests.StackSchemaVersion = 1
+
+	for _, stackKey in ipairs(ChestUtils.GetStackKeys()) do
+		unopenedChests.Stacks[stackKey] = normalizeChestCount(unopenedChests.Stacks[stackKey])
+	end
+
+	return unopenedChests
+end
+
+local function addTutorialDevilFruitChest(unopenedChests)
+	unopenedChests = ensureUnopenedChests(unopenedChests)
+
+	local configuredChest = if typeof(TutorialConfig.CompletionRewards) == "table"
+		and typeof(TutorialConfig.CompletionRewards.Chest) == "table"
+		then TutorialConfig.CompletionRewards.Chest
+		else {}
+	local chestData = ChestUtils.BuildChestData({
+		ChestKind = configuredChest.ChestKind or ChestRewards.ChestKinds.DevilFruit,
+		Tier = configuredChest.Tier,
+		FruitRarity = configuredChest.FruitRarity,
+		Source = configuredChest.Source or "TutorialCompletion",
+		RewardProfile = configuredChest.RewardProfile,
+		DepthBand = configuredChest.DepthBand,
+	})
+
+	local chestId = tostring(unopenedChests.NextChestId)
+	while unopenedChests.ById[chestId] ~= nil do
+		unopenedChests.NextChestId += 1
+		chestId = tostring(unopenedChests.NextChestId)
+	end
+
+	local storedChest = {
+		ChestId = chestId,
+		ChestKind = chestData.ChestKind,
+		Tier = chestData.Tier,
+		FruitRarity = chestData.FruitRarity,
+		DepthBand = tostring(chestData.DepthBand or ""),
+		Source = tostring(chestData.Source or ChestRewards.DefaultChestSource),
+		RewardProfile = tostring(chestData.RewardProfile or ChestRewards.DefaultRewardProfile),
+		CreatedAt = math.max(0, tonumber(chestData.CreatedAt) or os.time()),
+	}
+
+	unopenedChests.ById[chestId] = storedChest
+	table.insert(unopenedChests.Order, chestId)
+	unopenedChests.NextChestId += 1
+
+	return unopenedChests, storedChest
+end
+
+local function finishTutorialSession(player, session, popupText)
+	if session then
+		session.active = false
+		session.completed = true
+		session.warning = nil
+		cleanupTutorialTarget(player, session)
+	end
+	clearTutorialRuntimeAttributes(player)
+
+	if popupText and popupText ~= "" then
+		sendPopup(player, popupText, false)
+	end
+	pushState(player)
+	enqueueResourcesTutorial(player, "first_time_tutorial_complete")
+end
+
+local function claimCompletionRewards(player)
+	if rewardClaimsInFlight[player] == true then
+		return false, "Reward claim is already processing."
+	end
+
+	local session, message = ensureSession(player)
+	if not session then
+		return isTutorialCompleted(player), message
+	end
+
+	local step = getCurrentStep(session)
+	if not step or tostring(step.Id or "") ~= "final_rewards" then
+		return false, "Finish the tutorial first."
+	end
+
+	rewardClaimsInFlight[player] = true
+
+	local claimed, claimReadReason = DataManager:TryGetValue(player, TUTORIAL_FINAL_REWARD_CLAIMED_PATH)
+	if claimReadReason ~= nil then
+		rewardClaimsInFlight[player] = nil
+		session.warning = SAVE_FAILURE_MESSAGE
+		sendPopup(player, SAVE_FAILURE_MESSAGE, true)
+		pushState(player)
+		return false, SAVE_FAILURE_MESSAGE
+	end
+
+	if claimed == true then
+		DataManager:TrySetValue(player, TutorialConfig.CompletionPath, true)
+		finishTutorialSession(player, session, "Tutorial rewards already claimed.")
+		rewardClaimsInFlight[player] = nil
+		return true, nil
+	end
+
+	local existingUnopenedChests = DataManager:TryGetValue(player, "UnopenedChests")
+	local unopenedChests, storedChest = addTutorialDevilFruitChest(deepCopy(existingUnopenedChests))
+	local titlePath = "Titles.Unlocked." .. TUTORIAL_COMPLETION_TITLE_ID
+
+	local saved, saveResult = DataManager:TryApplyBatch(player, {
+		{ Path = "UnopenedChests", Value = unopenedChests },
+		{ Path = titlePath, Value = true },
+		{ Path = TUTORIAL_FINAL_REWARD_CLAIMED_PATH, Value = true },
+		{ Path = TutorialConfig.CompletionPath, Value = true },
+	}, {
+		PerfContext = "first_time_tutorial_completion_rewards",
+	})
+
+	if saved ~= true then
+		local reason = if typeof(saveResult) == "table" then saveResult.FailureReason or saveResult.Reason else saveResult
+		warn(string.format("[FirstTimeTutorialService] Could not save tutorial rewards for %s: %s", player.Name, tostring(reason)))
+		rewardClaimsInFlight[player] = nil
+		session.warning = SAVE_FAILURE_MESSAGE
+		sendPopup(player, SAVE_FAILURE_MESSAGE, true)
+		pushState(player)
+		return false, SAVE_FAILURE_MESSAGE
+	end
+
+	local titleOk, titleReason = TitleService.UnlockTitle(player, TUTORIAL_COMPLETION_TITLE_ID)
+	if titleOk ~= true then
+		warn(string.format(
+			"[FirstTimeTutorialService] Tutorial title runtime sync failed for %s title=%s reason=%s",
+			player.Name,
+			TUTORIAL_COMPLETION_TITLE_ID,
+			tostring(titleReason)
+		))
+	end
+
+	rewardClaimsInFlight[player] = nil
+	finishTutorialSession(
+		player,
+		session,
+		string.format("Claimed %s and %s!", "Rookie Captain", ChestUtils.GetDisplayName(storedChest))
+	)
+	return true, nil
+end
+
 local function completeTutorial(player)
 	local session = sessions[player]
 	if not session or session.active ~= true then
@@ -1596,15 +1771,7 @@ local function completeTutorial(player)
 		return false, SAVE_FAILURE_MESSAGE
 	end
 
-	session.active = false
-	session.completed = true
-	session.warning = nil
-	cleanupTutorialTarget(player, session)
-	clearTutorialRuntimeAttributes(player)
-
-	sendPopup(player, "Tutorial complete!", false)
-	pushState(player)
-	enqueueResourcesTutorial(player, "first_time_tutorial_complete")
+	finishTutorialSession(player, session, "Tutorial complete!")
 	return true, nil
 end
 
@@ -1697,7 +1864,7 @@ local function createSession(player)
 	return session
 end
 
-local function ensureSession(player)
+ensureSession = function(player)
 	local session = sessions[player]
 	if session then
 		return session
@@ -1828,6 +1995,7 @@ function FirstTimeTutorialService.ResetForTesting(player)
 	trySetTutorialResetFlag(player, TUTORIAL_STARTER_GRANTED_PATH, flagFailures)
 	trySetTutorialResetFlag(player, TUTORIAL_CREW_MEMBER_GRANTED_PATH, flagFailures)
 	trySetTutorialResetFlag(player, TUTORIAL_SPEED_TOP_UP_GRANTED_PATH, flagFailures)
+	trySetTutorialResetFlag(player, TUTORIAL_FINAL_REWARD_CLAIMED_PATH, flagFailures)
 
 	if #flagFailures > 0 then
 		pushState(player)
@@ -1910,6 +2078,15 @@ local function handleSkipRequest(player)
 	}
 end
 
+local function handleClaimCompletionRewardsRequest(player)
+	local success, message = claimCompletionRewards(player)
+	return {
+		success = success,
+		message = message,
+		state = buildState(player),
+	}
+end
+
 local function handleRequest(player, actionName)
 	if actionName == "GetState" then
 		local _, message = ensureSession(player)
@@ -1922,6 +2099,8 @@ local function handleRequest(player, actionName)
 		return handleAdvanceRequest(player)
 	elseif actionName == "Skip" then
 		return handleSkipRequest(player)
+	elseif actionName == "ClaimCompletionRewards" then
+		return handleClaimCompletionRewardsRequest(player)
 	end
 
 	return {
@@ -1942,6 +2121,13 @@ local function advanceIfCurrentStep(player, expectedStepId)
 		return false
 	end
 
+	local nextStep = TutorialConfig.GetStep((tonumber(session.stepIndex) or 0) + 1)
+	print(string.format(
+		"[FirstTimeTutorialDebug] advancing player=%s currentStep=%s nextStep=%s objectiveCompleted=true",
+		player.Name,
+		tostring(step.Id or ""),
+		tostring(nextStep and nextStep.Id or "complete")
+	))
 	session.progress = 1
 	session.lastPushedProgress = 1
 	advanceTutorial(player)
@@ -2075,6 +2261,12 @@ end
 
 StepHandlers.buy_speed.OnStart = function(player, session)
 	session.buySpeedStartValue = getSpeedValue(player)
+	session.buySpeedPurchaseDetected = false
+	print(string.format(
+		"[FirstTimeTutorialDebug] Step4 started player=%s currentStep=buy_speed startSpeed=%s",
+		player.Name,
+		tostring(session.buySpeedStartValue)
+	))
 	if session.buySpeedRecoveryAvailable ~= true and getSpeedValue(player) <= session.buySpeedStartValue then
 		session.buySpeedRecoveryAvailable = canRecoverSpeedUpgradePurchase(player)
 	end
@@ -2083,7 +2275,16 @@ end
 StepHandlers.buy_speed.Update = function(player, session)
 	local speedValue = getSpeedValue(player)
 	local startValue = tonumber(session.buySpeedStartValue) or 1
-	if speedValue > startValue or speedValue > 1 then
+	local objectiveCompleted = session.buySpeedPurchaseDetected == true or speedValue > startValue
+	if objectiveCompleted then
+		local nextStep = TutorialConfig.GetStep((tonumber(session.stepIndex) or 0) + 1)
+		print(string.format(
+			"[FirstTimeTutorialDebug] Step4 completion detected player=%s currentStep=buy_speed speed=%s startSpeed=%s nextStep=%s",
+			player.Name,
+			tostring(speedValue),
+			tostring(startValue),
+			tostring(nextStep and nextStep.Id or "complete")
+		))
 		advanceTutorial(player)
 		return
 	end
@@ -2139,6 +2340,24 @@ local function onObjectiveRecorded(player, eventData)
 		if session and isTutorialCrewMemberOnStand(player, session, context.StandName) then
 			session.collectedTutorialBeli = true
 			advanceIfCurrentStep(player, "collect_beli")
+		end
+	elseif objectiveType == "BuySpeed" then
+		local session = sessions[player]
+		local step = getCurrentStep(session)
+		print(string.format(
+			"[FirstTimeTutorialDebug] speed upgrade detected player=%s currentStep=%s newSpeed=%s previousSpeed=%s",
+			player.Name,
+			tostring(step and step.Id or ""),
+			tostring(context.NewSpeed),
+			tostring(context.PreviousSpeed)
+		))
+		if step and tostring(step.Id or "") == "buy_speed" then
+			session.buySpeedPurchaseDetected = true
+			print(string.format(
+				"[FirstTimeTutorialDebug] Step4 completion detected player=%s currentStep=buy_speed",
+				player.Name
+			))
+			advanceIfCurrentStep(player, "buy_speed")
 		end
 	end
 end
