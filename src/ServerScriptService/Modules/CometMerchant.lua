@@ -184,17 +184,12 @@ function CometMerchantService:ResetStock(targetPlayer)
 	end
 end
 
-local function spendComets(player, price)
-	local cur = DataManager:GetValue(player, "HiddenLeaderstats.Comets")
-	if typeof(cur) ~= "number" then return false end
-	if cur < price then return false end
-	DataManager:AdjustValue(player, "HiddenLeaderstats.Comets", -price)
-	return true
+-- The Comet event/merchant shell can remain, but the Comet currency itself is retired.
+local function spendRetiredCometCurrency(_player, _price)
+	return false
 end
 
-local function refundComets(player, price)
-	if typeof(price) ~= "number" or price <= 0 then return end
-	DataManager:AdjustValue(player, "HiddenLeaderstats.Comets", price)
+local function refundRetiredCometCurrency(_player, _price)
 end
 
 local function requiresPaidRandomItemPolicy()
@@ -281,13 +276,13 @@ PurchaseEvent.OnServerEvent:Connect(function(player, fullKeyIncoming)
 		end
 	end
 
-	if not spendComets(player, price) then
+	if not spendRetiredCometCurrency(player, price) then
 		return
 	end
 
 	local okReward = runReward(player, fullKey, amount)
 	if not okReward then
-		refundComets(player, price)
+		refundRetiredCometCurrency(player, price)
 		return
 	end
 

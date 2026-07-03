@@ -180,17 +180,17 @@ function TagManager:_equippedTitleTag(player: Player, timeNow: number): (string?
 		return nil, false
 	end
 
-	local titleDefinition = Titles.Get(equippedTitleId)
-	if typeof(titleDefinition) ~= "table" then
+	local titleStyle = Titles.ResolveDisplayStyle(equippedTitleId)
+	if typeof(titleStyle) ~= "table" then
 		return nil, false
 	end
 
-	local displayName = Titles.GetDisplayName(equippedTitleId) or ""
+	local displayName = tostring(titleStyle.DisplayName or "")
 	if displayName == "" then
 		return nil, false
 	end
 
-	local style = titleDefinition.ChatStyle or {
+	local style = Titles.GetChatStyle(equippedTitleId) or {
 		color = Color3.fromRGB(255, 218, 106),
 		bold = true,
 		brackets = true,

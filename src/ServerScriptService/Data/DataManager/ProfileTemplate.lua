@@ -29,7 +29,6 @@ local ProfileTemplate = {
 		LimitedReward = false,
 		Group = false,
 		PlotUpgrade = 0,
-		Comets = 0,
 	},
 
 	Tutorials = {

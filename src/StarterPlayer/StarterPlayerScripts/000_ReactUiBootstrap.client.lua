@@ -13,7 +13,6 @@ local HUD_DEBUG = false
 local GIFT_BOOTSTRAP_DEBUG = ReplicatedStorage:GetAttribute("GiftBootstrapDebug") == true
 local GIFT_BOOTSTRAP_DEBUG_VERSION = "gifts-bootstrap-slots-debug-2026-05-01"
 local DEFAULT_COUNTER_ICONS = {
-	Comet = "",
 	Speed = "rbxassetid://108512951338844",
 	Money = "rbxassetid://76300573750363",
 }
@@ -418,7 +417,6 @@ end
 
 local function captureLegacyCounterImages(counters)
 	local images = {
-		Comet = DEFAULT_COUNTER_ICONS.Comet,
 		Speed = DEFAULT_COUNTER_ICONS.Speed,
 		Money = DEFAULT_COUNTER_ICONS.Money,
 	}
@@ -426,7 +424,7 @@ local function captureLegacyCounterImages(counters)
 		return images
 	end
 
-	for _, statName in ipairs({ "Comet", "Speed", "Money" }) do
+	for _, statName in ipairs({ "Speed", "Money" }) do
 		local host = counters:FindFirstChild(statName)
 		if host then
 			local icon = host:FindFirstChild("Icon")
@@ -607,20 +605,16 @@ local function ensureHud()
 	local legacyCounterImages = captureLegacyCounterImages(counters)
 	clearChildren(counters)
 	counters.AnchorPoint = Vector2.new(0, 1)
-	counters.Size = UDim2.fromOffset(250, 172)
+	counters.Size = UDim2.fromOffset(250, 120)
 	counters.Position = UDim2.fromScale(0, 1)
 	counters.ClipsDescendants = false
 
-	local comet = ensureCounterHost(counters, "Comet", legacyCounterImages.Comet)
-	comet.Position = UDim2.fromOffset(0, 0)
-	ensureUIGradient(comet, Color3.fromRGB(185, 159, 222), Color3.fromRGB(226, 240, 255))
-
 	local speed = ensureCounterHost(counters, "Speed", legacyCounterImages.Speed)
-	speed.Position = UDim2.fromOffset(0, 52)
+	speed.Position = UDim2.fromOffset(0, 0)
 	ensureUIGradient(speed, Color3.fromRGB(255, 122, 122), Color3.fromRGB(255, 204, 176))
 
 	local money = ensureCounterHost(counters, "Money", legacyCounterImages.Money)
-	money.Position = UDim2.fromOffset(0, 104)
+	money.Position = UDim2.fromOffset(0, 52)
 	ensureUIGradient(money, Color3.fromRGB(62, 181, 35), Color3.fromRGB(198, 255, 76))
 
 	local countersNot = ensureFrame(counters, "Not")

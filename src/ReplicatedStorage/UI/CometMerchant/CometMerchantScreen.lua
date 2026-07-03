@@ -2,7 +2,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
-local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local e = React.createElement
 
@@ -96,7 +95,7 @@ local function offerRow(props)
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.new(1, -16, 1, -12),
 			Size = UDim2.fromOffset(128, 36),
-			Text = props.canBuy and "Buy" or "Sold Out",
+			Text = props.buttonText or (props.canBuy and "Buy" or "Sold Out"),
 			TextColor3 = props.canBuy and COLORS.ButtonText or COLORS.Muted,
 			TextSize = 15,
 			[React.Event.Activated] = if props.canBuy then props.onBuy else nil,
@@ -118,7 +117,8 @@ local function CometMerchantScreen(props)
 
 	for index, offer in ipairs(props.offers or {}) do
 		children["Offer" .. tostring(index)] = e(offerRow, {
-			canBuy = offer.stock > 0,
+			buttonText = "Unavailable",
+			canBuy = false,
 			description = offer.description,
 			icon = offer.icon,
 			layoutOrder = index,
@@ -126,7 +126,7 @@ local function CometMerchantScreen(props)
 			onBuy = function()
 				props.onBuy(offer.fullPath)
 			end,
-			priceText = CurrencyUtil.formatCurrency(offer.price),
+			priceText = "Retired",
 			stockText = string.format("x%d Stock", offer.stock),
 		})
 	end

@@ -21,27 +21,16 @@ local SHADOW = Color3.fromRGB(0, 0, 0)
 local REFERENCE_VIEWPORT = Vector2.new(1920, 1080)
 local MIN_SCALE = 0.48
 local BASE_SIZE = Vector2.new(330, 96)
-local BASE_TITLE_SIZE = Vector2.new(330, 122)
-local BASE_ROW_Y = {
-	Title = 0,
-	Name = 0,
-	Beli = 31,
-	Status = 59,
-}
-local BASE_TITLE_ROW_Y = {
-	Title = 0,
-	Name = 30,
-	Beli = 61,
-	Status = 89,
-}
+local BASE_TITLE_SIZE = Vector2.new(360, 144)
+local BASE_ROW_PADDING = 4
 local BASE_TEXT_SIZE = {
-	Title = 22,
+	Title = 38,
 	Name = 34,
 	Beli = 24,
 	Status = 18,
 }
 local MIN_TEXT_SIZE = {
-	Title = 10,
+	Title = 17,
 	Name = 15,
 	Beli = 11,
 	Status = 8,
@@ -69,6 +58,10 @@ local function scaleTextSize(key, scale)
 	return math.max(MIN_TEXT_SIZE[key], scaleOffset(BASE_TEXT_SIZE[key], scale))
 end
 
+local function labelHeight(textSize)
+	return math.max(1, textSize + 6)
+end
+
 local function formatBeli(value)
 	return Shorten.roundNumber(math.max(0, math.floor((tonumber(value) or 0) + 0.5))) .. CurrencyUtil.getCompactSuffix()
 end
@@ -80,35 +73,87 @@ local function formatRemaining(seconds)
 	return string.format("%d:%02d", minutes, remainder)
 end
 
-local function textRow(text, color, y, size)
+local function makeColorSequence(colors)
+	if typeof(colors) ~= "table" or #colors <= 0 then
+		return nil
+	end
+
+	if #colors == 1 then
+		return ColorSequence.new(colors[1])
+	end
+
+	local keypoints = {}
+	for index, color in ipairs(colors) do
+		if typeof(color) == "Color3" then
+			local position = if #colors == 1 then 0 else (index - 1) / (#colors - 1)
+			keypoints[#keypoints + 1] = ColorSequenceKeypoint.new(position, color)
+		end
+	end
+
+	return if #keypoints >= 2 then ColorSequence.new(keypoints) else nil
+end
+
+local function titleGradient(style, now)
+	local colors = style and style.GradientColors
+	local colorSequence = makeColorSequence(colors)
+	if not colorSequence then
+		return nil
+	end
+
+	local effect = tostring(style.Effect or "None")
+	local speed = math.max(0, tonumber(style.AnimationSpeed) or 0)
+	local phase = if speed > 0 then (now * speed) % 1 else 0
+	local animated = effect == "Shimmer" or effect == "AnimatedGradient" or effect == "Rainbow"
+
+	return e("UIGradient", {
+		Color = colorSequence,
+		Offset = if animated then Vector2.new((phase * 2) - 1, 0) else Vector2.zero,
+		Rotation = if effect == "Rainbow" then 12 else 0,
+	})
+end
+
+local function textRow(text, color, size, layoutOrder, options)
+	options = options or {}
 	return e("TextLabel", {
-		AnchorPoint = Vector2.new(0.5, 0),
 		BackgroundTransparency = 1,
 		Font = IndexTheme.Fonts.Display,
-		Position = UDim2.new(0.5, 0, 0, y),
-		Size = UDim2.new(1, 0, 0, size + 6),
+		LayoutOrder = layoutOrder,
+		Size = UDim2.new(1, 0, 0, labelHeight(size)),
 		Text = text,
 		TextColor3 = color,
 		TextSize = size,
 		TextStrokeColor3 = SHADOW,
-		TextStrokeTransparency = 0.18,
+		TextStrokeTransparency = math.clamp(tonumber(options.StrokeTransparency) or 0.18, 0, 1),
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		TextXAlignment = Enum.TextXAlignment.Center,
-	})
+	}, options.Children)
 end
 
-local function getTitleText(entry)
+local function getTitleStyle(entry)
 	local titleId = tostring(entry.equippedTitleId or "")
 	if titleId == "" then
 		return nil
 	end
 
-	local displayName = Titles.GetDisplayName(titleId)
-	if not displayName then
+	return Titles.ResolveDisplayStyle(titleId)
+end
+
+local function getTitleChildren(style, now)
+	return {
+		Gradient = titleGradient(style, now),
+	}
+end
+
+local function titleTextRow(style, now, size)
+	if not style then
 		return nil
 	end
 
-	return "[" .. displayName .. "]"
+	local hasGradient = typeof(style.GradientColors) == "table" and #style.GradientColors > 0
+	return textRow(style.DisplayName, if hasGradient then Color3.new(1, 1, 1) else style.Color, size, 1, {
+		StrokeTransparency = style.StrokeTransparency,
+		Children = getTitleChildren(style, now),
+	})
 end
 
 local function getStatusText(entry)
@@ -127,10 +172,10 @@ local function PlayerOverheadBillboard(props)
 	local beliTextSize = scaleTextSize("Beli", scale)
 	local statusTextSize = scaleTextSize("Status", scale)
 	local titleTextSize = scaleTextSize("Title", scale)
-	local titleText = getTitleText(entry)
-	local hasTitle = titleText ~= nil
-	local rowY = if hasTitle then BASE_TITLE_ROW_Y else BASE_ROW_Y
+	local titleStyle = getTitleStyle(entry)
+	local hasTitle = titleStyle ~= nil
 	local baseSize = if hasTitle then BASE_TITLE_SIZE else BASE_SIZE
+	local now = tonumber(entry.now) or 0
 
 	return e("BillboardGui", {
 		Adornee = entry.adornee,
@@ -141,10 +186,24 @@ local function PlayerOverheadBillboard(props)
 		StudsOffsetWorldSpace = Vector3.new(0, math.max(MIN_STUDS_OFFSET_Y, BASE_STUDS_OFFSET_Y * scale), 0),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
-		Title = if hasTitle then textRow(titleText, GOLD, scaleOffset(rowY.Title, scale), titleTextSize) else nil,
-		Name = textRow(tostring(entry.playerName or "Player"), TEXT, scaleOffset(rowY.Name, scale), nameTextSize),
-		Beli = textRow(formatBeli(entry.balance), GOLD, scaleOffset(rowY.Beli, scale), beliTextSize),
-		Status = textRow(statusText, statusColor, scaleOffset(rowY.Status, scale), statusTextSize),
+		Stack = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromScale(1, 1),
+		}, {
+			List = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Vertical,
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, scaleOffset(BASE_ROW_PADDING, scale)),
+				VerticalAlignment = Enum.VerticalAlignment.Center,
+			}),
+			Title = if hasTitle then titleTextRow(titleStyle, now, titleTextSize) else nil,
+			Name = textRow(tostring(entry.playerName or "Player"), TEXT, nameTextSize, 2),
+			Beli = textRow(formatBeli(entry.balance), GOLD, beliTextSize, 3),
+			Status = textRow(statusText, statusColor, statusTextSize, 4),
+		}),
 	})
 end
 

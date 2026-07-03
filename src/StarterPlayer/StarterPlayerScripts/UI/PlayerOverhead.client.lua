@@ -396,6 +396,7 @@ local function buildEntries(now)
 				distance = distance,
 				key = key,
 				adornee = adornee,
+				now = now,
 				playerName = player.Name,
 				equippedTitleId = player:GetAttribute("EquippedTitleId"),
 				balance = currencyValue and currencyValue.Value or 0,
@@ -442,7 +443,7 @@ local function PlayerOverheadLayer()
 		local running = true
 		task.spawn(function()
 			while running do
-				task.wait(1)
+				task.wait(0.25)
 				setNow(Workspace:GetServerTimeNow())
 			end
 		end)

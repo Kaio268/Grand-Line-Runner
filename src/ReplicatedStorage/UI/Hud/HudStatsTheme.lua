@@ -80,15 +80,6 @@ HudStatsTheme.Popup = {
 }
 
 HudStatsTheme.Palette = {
-	Comet = {
-		value = Color3.fromRGB(250, 249, 255),
-		label = Color3.fromRGB(220, 214, 255),
-		stroke = Color3.fromRGB(67, 73, 103),
-		shadow = Color3.fromRGB(17, 20, 30),
-		glow = Color3.fromRGB(145, 152, 198),
-		rowFill = Color3.fromRGB(126, 132, 180),
-		rowStroke = Color3.fromRGB(159, 169, 214),
-	},
 	Speed = {
 		value = Color3.fromRGB(255, 226, 185),
 		label = Color3.fromRGB(255, 190, 132),

@@ -207,6 +207,89 @@ local TIERS = {
 
 TIERS.Mythical = TIERS.Mythic
 
+local TITLE_RARITY_STYLES = {
+	Common = {
+		Color = Color3.fromRGB(218, 224, 235),
+		Effect = "None",
+		StrokeTransparency = 0.2,
+		ChatColor = Color3.fromRGB(218, 224, 235),
+	},
+	Uncommon = {
+		Color = Color3.fromRGB(124, 232, 152),
+		Effect = "None",
+		StrokeTransparency = 0.18,
+		ChatColor = Color3.fromRGB(124, 232, 152),
+	},
+	Rare = {
+		Color = Color3.fromRGB(112, 198, 255),
+		Effect = "SoftGlow",
+		StrokeTransparency = 0.1,
+		ChatColor = Color3.fromRGB(112, 198, 255),
+	},
+	Epic = {
+		Color = Color3.fromRGB(213, 133, 255),
+		Effect = "Gradient",
+		StrokeTransparency = 0.08,
+		GradientColors = {
+			Color3.fromRGB(184, 102, 255),
+			Color3.fromRGB(255, 138, 214),
+		},
+		ChatColor = Color3.fromRGB(213, 133, 255),
+	},
+	Legendary = {
+		Color = Color3.fromRGB(255, 210, 92),
+		Effect = "Shimmer",
+		StrokeTransparency = 0.04,
+		GradientColors = {
+			Color3.fromRGB(255, 178, 67),
+			Color3.fromRGB(255, 245, 162),
+			Color3.fromRGB(255, 193, 74),
+		},
+		AnimationSpeed = 0.28,
+		ChatColor = Color3.fromRGB(255, 210, 92),
+	},
+	Mythic = {
+		Color = Color3.fromRGB(255, 112, 147),
+		Effect = "AnimatedGradient",
+		StrokeTransparency = 0.02,
+		GradientColors = {
+			Color3.fromRGB(255, 91, 130),
+			Color3.fromRGB(255, 171, 106),
+			Color3.fromRGB(255, 123, 192),
+		},
+		AnimationSpeed = 0.22,
+		ChatColor = Color3.fromRGB(255, 112, 147),
+	},
+	Godly = {
+		Color = Color3.fromRGB(255, 95, 95),
+		Effect = "Rainbow",
+		StrokeTransparency = 0,
+		GradientColors = {
+			Color3.fromRGB(255, 88, 88),
+			Color3.fromRGB(255, 207, 92),
+			Color3.fromRGB(119, 235, 157),
+			Color3.fromRGB(101, 203, 255),
+			Color3.fromRGB(212, 132, 255),
+		},
+		AnimationSpeed = 0.18,
+		ChatColor = Color3.fromRGB(255, 118, 118),
+	},
+	Secret = {
+		Color = Color3.fromRGB(255, 242, 118),
+		Effect = "Rainbow",
+		StrokeTransparency = 0,
+		GradientColors = {
+			Color3.fromRGB(255, 242, 118),
+			Color3.fromRGB(255, 144, 97),
+			Color3.fromRGB(255, 118, 212),
+			Color3.fromRGB(123, 202, 255),
+			Color3.fromRGB(255, 252, 190),
+		},
+		AnimationSpeed = 0.15,
+		ChatColor = Color3.fromRGB(255, 242, 118),
+	},
+}
+
 local TITLE_GROUPS = {
 	Common = {
 		Order = {
@@ -553,6 +636,7 @@ Titles.ByTier = TITLE_GROUPS
 Titles.TierOrder = TIER_ORDER
 Titles.TierAliases = TIER_ALIASES
 Titles.Tiers = TIERS
+Titles.TitleRarityStyles = TITLE_RARITY_STYLES
 
 local function sanitizeDisplayName(value)
 	local text = tostring(value or "")
@@ -583,6 +667,71 @@ function Titles.GetDisplayName(titleId)
 
 	local displayName = sanitizeDisplayName(definition.DisplayName or definition.Id or titleId)
 	return if displayName ~= "" then displayName else nil
+end
+
+local function copyColorArray(colors)
+	if typeof(colors) ~= "table" then
+		return nil
+	end
+
+	local result = {}
+	for _, color in ipairs(colors) do
+		if typeof(color) == "Color3" then
+			result[#result + 1] = color
+		end
+	end
+
+	return if #result > 0 then result else nil
+end
+
+local function getTierStyle(tierName)
+	local canonicalTier = TIER_ALIASES[string.lower(tostring(tierName or ""))] or "Common"
+	return TITLE_RARITY_STYLES[canonicalTier] or TITLE_RARITY_STYLES.Common, canonicalTier
+end
+
+function Titles.ResolveDisplayStyle(titleId)
+	local definition = Titles.Get(titleId)
+	if typeof(definition) ~= "table" then
+		return nil
+	end
+
+	local displayName = Titles.GetDisplayName(titleId)
+	if not displayName then
+		return nil
+	end
+
+	local style, rarity = getTierStyle(definition.Tier)
+	local color = if typeof(style.Color) == "Color3" then style.Color else Color3.fromRGB(218, 224, 235)
+	local chatColor = if typeof(style.ChatColor) == "Color3" then style.ChatColor else color
+
+	return {
+		TitleId = tostring(definition.Id or titleId),
+		DisplayName = displayName,
+		Rarity = rarity,
+		TierRank = math.max(1, math.floor(tonumber(definition.TierRank) or 1)),
+		Color = color,
+		ChatColor = chatColor,
+		Effect = tostring(style.Effect or "None"),
+		GradientColors = copyColorArray(style.GradientColors),
+		AnimationSpeed = math.max(0, tonumber(style.AnimationSpeed) or 0),
+		StrokeTransparency = math.clamp(tonumber(style.StrokeTransparency) or 0.18, 0, 1),
+		Bold = true,
+	}
+end
+
+function Titles.GetChatStyle(titleId)
+	local style = Titles.ResolveDisplayStyle(titleId)
+	if not style then
+		return nil
+	end
+
+	return {
+		color = style.ChatColor,
+		bold = style.Bold ~= false,
+		brackets = true,
+		spaceAfter = true,
+		animated = false,
+	}
 end
 
 function Titles.GetAll()

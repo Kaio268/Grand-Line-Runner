@@ -25,13 +25,11 @@ local HudStatsTheme = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStat
 local e = React.createElement
 
 local STAT_ORDER = {
-	{ name = "Comet", kind = "Comet" },
 	{ name = "Speed", kind = "Speed" },
 	{ name = "Money", kind = "Money" },
 }
 
 local STAT_ICON_ASSET_OVERRIDES = {
-	Comet = "",
 	Speed = "rbxassetid://108512951338844",
 	Money = "rbxassetid://76300573750363",
 }
@@ -309,9 +307,6 @@ local function findCounterIcon(counters, host, statName)
 			score += 3500
 		end
 		if statNameLower == "speed" and string.find(nameLower, "shoe", 1, true) then
-			score += 3500
-		end
-		if statNameLower == "comet" and string.find(nameLower, "cloud", 1, true) then
 			score += 3500
 		end
 
@@ -694,7 +689,6 @@ end
 local relevantNames = {
 	HUD = true,
 	Counters = true,
-	Comet = true,
 	Speed = true,
 	Money = true,
 	Not = true,
