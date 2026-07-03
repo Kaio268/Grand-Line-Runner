@@ -40,6 +40,9 @@ local PUSH_PROGRESS_DELTA = 0.05
 local HIDDEN_LEADERSTATS_NAME = "HiddenLeaderstats"
 local TUTORIAL_VALUE_NAME = "Tutorial"
 local TUTORIAL_STARTER_GRANTED_PATH = "HiddenLeaderstats.TutorialStarterBeliGranted"
+local TUTORIAL_SKIPPED_PATH = tostring(TutorialConfig.SkippedPath or "HiddenLeaderstats.TutorialSkipped")
+local TUTORIAL_IN_PROGRESS_PATH = tostring(TutorialConfig.InProgressPath or "HiddenLeaderstats.TutorialInProgress")
+local TUTORIAL_CURRENT_STEP_PATH = tostring(TutorialConfig.CurrentStepPath or "HiddenLeaderstats.TutorialCurrentStep")
 local BELI_DIAGNOSTICS_ATTRIBUTE = "BeliDiagnosticsEnabled"
 local TUTORIAL_CREW_MEMBER_GRANTED_PATH = tostring(
 	(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.GrantedPath)
@@ -224,6 +227,57 @@ local function isTutorialCompleted(player)
 
 	local tutorialValue = getTutorialValueObject(player)
 	return tutorialValue ~= nil and tutorialValue:IsA("BoolValue") and tutorialValue.Value == true
+end
+
+local function requestProfileSave(player, reason)
+	local profile = DataManager:TryGetProfile(player)
+	if profile == nil or typeof(profile.Save) ~= "function" then
+		return
+	end
+
+	task.spawn(function()
+		local ok, err = pcall(function()
+			profile:Save()
+		end)
+		if not ok then
+			warn(string.format(
+				"[FirstTimeTutorialService] Profile save request failed for %s reason=%s error=%s",
+				player.Name,
+				tostring(reason or "tutorial_progress"),
+				tostring(err)
+			))
+		end
+	end)
+end
+
+local function isTutorialSkipped(player)
+	local skipped, reason = DataManager:TryGetValue(player, TUTORIAL_SKIPPED_PATH)
+	return reason == nil and skipped == true
+end
+
+local function getSavedTutorialStepId(player)
+	local stepId, reason = DataManager:TryGetValue(player, TUTORIAL_CURRENT_STEP_PATH)
+	if reason == nil and typeof(stepId) == "string" then
+		return stepId
+	end
+
+	return ""
+end
+
+local function getStepIndexById(stepId)
+	if typeof(TutorialConfig.GetStepIndexById) == "function" then
+		return TutorialConfig.GetStepIndexById(stepId)
+	end
+
+	stepId = tostring(stepId or "")
+	for index = 1, TutorialConfig.GetStepCount() do
+		local step = TutorialConfig.GetStep(index)
+		if step and tostring(step.Id or "") == stepId then
+			return index
+		end
+	end
+
+	return nil
 end
 
 local function getRootPosition(player)
@@ -1524,12 +1578,15 @@ end
 local function buildState(player)
 	local session = sessions[player]
 	local completed = isTutorialCompleted(player)
+	local skipped = isTutorialSkipped(player)
 	if completed or not session or session.active ~= true then
 		return {
 			active = false,
 			completed = completed,
+			skipped = skipped,
 			version = TutorialConfig.Version,
 			stepIndex = 0,
+			stepId = "",
 			totalSteps = TutorialConfig.GetStepCount(),
 			progress = 0,
 			canAdvance = false,
@@ -1539,8 +1596,10 @@ local function buildState(player)
 	return {
 		active = true,
 		completed = false,
+		skipped = false,
 		version = TutorialConfig.Version,
 		stepIndex = session.stepIndex,
+		stepId = tostring((getCurrentStep(session) or {}).Id or ""),
 		totalSteps = TutorialConfig.GetStepCount(),
 		step = serializeStep(getCurrentStep(session)),
 		target = serializeObjectiveTarget(player, session, getCurrentStep(session)),
@@ -1581,6 +1640,50 @@ local function setProgress(player, session, progress)
 		session.lastPushedProgress = progress
 		pushState(player)
 	end
+end
+
+local function saveTutorialProgress(player, session, step, saveReason)
+	if not session or typeof(step) ~= "table" then
+		return false, "invalid_session"
+	end
+
+	local stepId = tostring(step.Id or "")
+	if stepId == "" then
+		return false, "invalid_step"
+	end
+
+	local saved, result = DataManager:TryApplyBatch(player, {
+		{ Path = TUTORIAL_CURRENT_STEP_PATH, Value = stepId },
+		{ Path = TUTORIAL_IN_PROGRESS_PATH, Value = true },
+		{ Path = TUTORIAL_SKIPPED_PATH, Value = false },
+	}, {
+		PerfContext = "first_time_tutorial_progress",
+	})
+	if saved == true then
+		requestProfileSave(player, saveReason or ("step_" .. stepId))
+		return true, nil
+	end
+
+	local reason = if typeof(result) == "table" then result.FailureReason or result.Reason else result
+	return false, tostring(reason or "save_failed")
+end
+
+local function saveTutorialTerminalState(player, completed, skipped, saveReason)
+	local saved, result = DataManager:TryApplyBatch(player, {
+		{ Path = TutorialConfig.CompletionPath, Value = completed == true },
+		{ Path = TUTORIAL_SKIPPED_PATH, Value = skipped == true },
+		{ Path = TUTORIAL_IN_PROGRESS_PATH, Value = false },
+		{ Path = TUTORIAL_CURRENT_STEP_PATH, Value = "" },
+	}, {
+		PerfContext = "first_time_tutorial_terminal_state",
+	})
+	if saved == true then
+		requestProfileSave(player, saveReason or "terminal_state")
+		return true, nil
+	end
+
+	local reason = if typeof(result) == "table" then result.FailureReason or result.Reason else result
+	return false, tostring(reason or "save_failed")
 end
 
 local function sendPopup(player, text, isError)
@@ -1708,7 +1811,7 @@ local function claimCompletionRewards(player)
 	end
 
 	if claimed == true then
-		DataManager:TrySetValue(player, TutorialConfig.CompletionPath, true)
+		saveTutorialTerminalState(player, true, false, "completion_rewards_already_claimed")
 		finishTutorialSession(player, session, "Tutorial rewards already claimed.")
 		rewardClaimsInFlight[player] = nil
 		return true, nil
@@ -1723,6 +1826,9 @@ local function claimCompletionRewards(player)
 		{ Path = titlePath, Value = true },
 		{ Path = TUTORIAL_FINAL_REWARD_CLAIMED_PATH, Value = true },
 		{ Path = TutorialConfig.CompletionPath, Value = true },
+		{ Path = TUTORIAL_SKIPPED_PATH, Value = false },
+		{ Path = TUTORIAL_IN_PROGRESS_PATH, Value = false },
+		{ Path = TUTORIAL_CURRENT_STEP_PATH, Value = "" },
 	}, {
 		PerfContext = "first_time_tutorial_completion_rewards",
 	})
@@ -1736,6 +1842,7 @@ local function claimCompletionRewards(player)
 		pushState(player)
 		return false, SAVE_FAILURE_MESSAGE
 	end
+	requestProfileSave(player, "completion_rewards")
 
 	local titleOk, titleReason = TitleService.UnlockTitle(player, TUTORIAL_COMPLETION_TITLE_ID)
 	if titleOk ~= true then
@@ -1762,7 +1869,7 @@ local function completeTutorial(player)
 		return false, "Tutorial is not active."
 	end
 
-	local success, reason = DataManager:TrySetValue(player, TutorialConfig.CompletionPath, true)
+	local success, reason = saveTutorialTerminalState(player, true, false, "complete_tutorial")
 	if success ~= true then
 		warn(string.format("[FirstTimeTutorialService] Could not save tutorial completion for %s: %s", player.Name, tostring(reason)))
 		session.warning = SAVE_FAILURE_MESSAGE
@@ -1795,6 +1902,17 @@ local function startStep(player, stepIndex)
 	session.objectiveTargetCache = {}
 	session.lastPushedObjectiveTargetSignature = nil
 	setTutorialRuntimeAttributes(player, session, step)
+
+	local progressSaved, progressSaveReason = saveTutorialProgress(player, session, step, "start_step_" .. tostring(step.Id or ""))
+	if progressSaved ~= true then
+		warn(string.format(
+			"[FirstTimeTutorialService] Could not save tutorial checkpoint for %s step=%s reason=%s",
+			player.Name,
+			tostring(step.Id or ""),
+			tostring(progressSaveReason)
+		))
+		session.warning = SAVE_FAILURE_MESSAGE
+	end
 
 	local stepId = tostring(step.Id or "")
 	if stepId ~= "pickup_crew_member" and not hasCarriedCrewMember(player) then
@@ -1831,12 +1949,86 @@ local function advanceTutorial(player)
 	return true, nil
 end
 
+local function inferTutorialStepIndex(player, session)
+	local finalRewardsClaimed, finalRewardsReason = DataManager:TryGetValue(player, TUTORIAL_FINAL_REWARD_CLAIMED_PATH)
+	if finalRewardsReason == nil and finalRewardsClaimed == true then
+		return TutorialConfig.GetStepCount()
+	end
+
+	if hasPlacedTutorialCrewMember(player, session) then
+		if getSpeedValue(player) > 1 then
+			return getStepIndexById("final_rewards") or TutorialConfig.GetStepCount()
+		end
+
+		return getStepIndexById("collect_beli") or 4
+	end
+
+	if getTutorialCrewMemberGranted(player) or hasTutorialReward(player, session) then
+		return getStepIndexById("place_on_stand") or 3
+	end
+
+	return 1
+end
+
+local function validateResumeStepIndex(player, session, stepIndex, savedStepId)
+	local stepCount = TutorialConfig.GetStepCount()
+	stepIndex = math.clamp(math.floor(tonumber(stepIndex) or 1), 1, stepCount)
+
+	local placeStepIndex = getStepIndexById("place_on_stand") or 3
+	local collectStepIndex = getStepIndexById("collect_beli") or 4
+	local buySpeedStepIndex = getStepIndexById("buy_speed") or 5
+	local finalStepIndex = getStepIndexById("final_rewards") or stepCount
+	local hasTutorialInventoryReward = getTutorialCrewMemberGranted(player) or hasTutorialReward(player, session)
+
+	if stepIndex >= placeStepIndex and not hasTutorialInventoryReward then
+		warn(string.format(
+			"[FirstTimeTutorialService] Falling back tutorial resume for %s from %s because tutorial reward was missing.",
+			player.Name,
+			tostring(savedStepId or stepIndex)
+		))
+		return getStepIndexById("pickup_crew_member") or 2
+	end
+
+	if stepIndex >= collectStepIndex and not hasPlacedTutorialCrewMember(player, session) then
+		warn(string.format(
+			"[FirstTimeTutorialService] Falling back tutorial resume for %s from %s because placed tutorial crew was missing.",
+			player.Name,
+			tostring(savedStepId or stepIndex)
+		))
+		return placeStepIndex
+	end
+
+	if stepIndex >= finalStepIndex and getSpeedValue(player) <= 1 then
+		return buySpeedStepIndex
+	end
+
+	return stepIndex
+end
+
+local function resolveResumeStepIndex(player, session)
+	local savedStepId = getSavedTutorialStepId(player)
+	if savedStepId ~= "" then
+		local stepIndex = getStepIndexById(savedStepId)
+		if stepIndex then
+			return validateResumeStepIndex(player, session, stepIndex, savedStepId)
+		end
+
+		warn(string.format(
+			"[FirstTimeTutorialService] Saved tutorial step %s for %s is invalid; using nearest safe checkpoint.",
+			tostring(savedStepId),
+			player.Name
+		))
+	end
+
+	return validateResumeStepIndex(player, session, inferTutorialStepIndex(player, session), savedStepId)
+end
+
 local function createSession(player)
 	if sessions[player] then
 		return sessions[player]
 	end
 
-	if isTutorialCompleted(player) then
+	if isTutorialCompleted(player) or isTutorialSkipped(player) then
 		pushState(player)
 		return nil
 	end
@@ -1860,7 +2052,7 @@ local function createSession(player)
 	reconcileTutorialCrewMemberGrant(player, session)
 	reconcileTutorialSpeedRecovery(player)
 	restoreGrantedTutorialReward(player, session)
-	startStep(player, 1)
+	startStep(player, resolveResumeStepIndex(player, session))
 	return session
 end
 
@@ -1912,7 +2104,7 @@ local function skipTutorial(player)
 		return false, "Tutorial data is still loading.", nil
 	end
 
-	local success, reason = DataManager:TrySetValue(player, TutorialConfig.CompletionPath, true)
+	local success, reason = saveTutorialTerminalState(player, true, true, "skip_tutorial")
 	if success == false then
 		warn(string.format("[FirstTimeTutorialService] Could not save tutorial skip for %s: %s", player.Name, tostring(reason)))
 		local session = sessions[player]
@@ -1992,10 +2184,19 @@ function FirstTimeTutorialService.ResetForTesting(player)
 
 	local flagFailures = {}
 	trySetTutorialResetFlag(player, TutorialConfig.CompletionPath, flagFailures)
+	trySetTutorialResetFlag(player, TUTORIAL_SKIPPED_PATH, flagFailures)
+	trySetTutorialResetFlag(player, TUTORIAL_IN_PROGRESS_PATH, flagFailures)
 	trySetTutorialResetFlag(player, TUTORIAL_STARTER_GRANTED_PATH, flagFailures)
 	trySetTutorialResetFlag(player, TUTORIAL_CREW_MEMBER_GRANTED_PATH, flagFailures)
 	trySetTutorialResetFlag(player, TUTORIAL_SPEED_TOP_UP_GRANTED_PATH, flagFailures)
 	trySetTutorialResetFlag(player, TUTORIAL_FINAL_REWARD_CLAIMED_PATH, flagFailures)
+	local resetStepSuccess, resetStepReason = DataManager:TrySetValue(player, TUTORIAL_CURRENT_STEP_PATH, "")
+	if resetStepSuccess ~= true then
+		table.insert(
+			flagFailures,
+			string.format("%s:%s", TUTORIAL_CURRENT_STEP_PATH, tostring(resetStepReason or "set_failed"))
+		)
+	end
 
 	if #flagFailures > 0 then
 		pushState(player)
@@ -2008,6 +2209,7 @@ function FirstTimeTutorialService.ResetForTesting(player)
 			RemovedTutorialTools = removedTutorialTools,
 		}
 	end
+	requestProfileSave(player, "reset_for_testing")
 
 	local standRefreshOk, standRefreshReason = refreshStandRuntime(player)
 	local nextSession = createSession(player)

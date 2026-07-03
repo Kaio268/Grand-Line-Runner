@@ -6,6 +6,7 @@ local React = require(Packages:WaitForChild("React"))
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Shorten = require(Modules:WaitForChild("Shorten"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local Responsive = require(script.Parent.Parent:WaitForChild("Responsive"))
 local IndexTheme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
 
@@ -20,17 +21,27 @@ local SHADOW = Color3.fromRGB(0, 0, 0)
 local REFERENCE_VIEWPORT = Vector2.new(1920, 1080)
 local MIN_SCALE = 0.48
 local BASE_SIZE = Vector2.new(330, 96)
+local BASE_TITLE_SIZE = Vector2.new(330, 122)
 local BASE_ROW_Y = {
+	Title = 0,
 	Name = 0,
 	Beli = 31,
 	Status = 59,
 }
+local BASE_TITLE_ROW_Y = {
+	Title = 0,
+	Name = 30,
+	Beli = 61,
+	Status = 89,
+}
 local BASE_TEXT_SIZE = {
+	Title = 22,
 	Name = 34,
 	Beli = 24,
 	Status = 18,
 }
 local MIN_TEXT_SIZE = {
+	Title = 10,
 	Name = 15,
 	Beli = 11,
 	Status = 8,
@@ -86,6 +97,20 @@ local function textRow(text, color, y, size)
 	})
 end
 
+local function getTitleText(entry)
+	local titleId = tostring(entry.equippedTitleId or "")
+	if titleId == "" then
+		return nil
+	end
+
+	local displayName = Titles.GetDisplayName(titleId)
+	if not displayName then
+		return nil
+	end
+
+	return "[" .. displayName .. "]"
+end
+
 local function getStatusText(entry)
 	if entry.horoActive == true and tonumber(entry.horoRemaining) ~= nil then
 		return "Ghost Projection " .. formatRemaining(entry.horoRemaining), CYAN
@@ -101,19 +126,25 @@ local function PlayerOverheadBillboard(props)
 	local nameTextSize = scaleTextSize("Name", scale)
 	local beliTextSize = scaleTextSize("Beli", scale)
 	local statusTextSize = scaleTextSize("Status", scale)
+	local titleTextSize = scaleTextSize("Title", scale)
+	local titleText = getTitleText(entry)
+	local hasTitle = titleText ~= nil
+	local rowY = if hasTitle then BASE_TITLE_ROW_Y else BASE_ROW_Y
+	local baseSize = if hasTitle then BASE_TITLE_SIZE else BASE_SIZE
 
 	return e("BillboardGui", {
 		Adornee = entry.adornee,
 		AlwaysOnTop = true,
 		LightInfluence = 0,
 		MaxDistance = math.clamp(BASE_MAX_DISTANCE * scale, MIN_MAX_DISTANCE, BASE_MAX_DISTANCE),
-		Size = UDim2.fromOffset(scaleOffset(BASE_SIZE.X, scale), scaleOffset(BASE_SIZE.Y, scale)),
+		Size = UDim2.fromOffset(scaleOffset(baseSize.X, scale), scaleOffset(baseSize.Y, scale)),
 		StudsOffsetWorldSpace = Vector3.new(0, math.max(MIN_STUDS_OFFSET_Y, BASE_STUDS_OFFSET_Y * scale), 0),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
-		Name = textRow(tostring(entry.playerName or "Player"), TEXT, scaleOffset(BASE_ROW_Y.Name, scale), nameTextSize),
-		Beli = textRow(formatBeli(entry.balance), GOLD, scaleOffset(BASE_ROW_Y.Beli, scale), beliTextSize),
-		Status = textRow(statusText, statusColor, scaleOffset(BASE_ROW_Y.Status, scale), statusTextSize),
+		Title = if hasTitle then textRow(titleText, GOLD, scaleOffset(rowY.Title, scale), titleTextSize) else nil,
+		Name = textRow(tostring(entry.playerName or "Player"), TEXT, scaleOffset(rowY.Name, scale), nameTextSize),
+		Beli = textRow(formatBeli(entry.balance), GOLD, scaleOffset(rowY.Beli, scale), beliTextSize),
+		Status = textRow(statusText, statusColor, scaleOffset(rowY.Status, scale), statusTextSize),
 	})
 end
 

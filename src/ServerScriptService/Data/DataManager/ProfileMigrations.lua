@@ -882,6 +882,15 @@ function ProfileMigrations.Apply(data)
 	hiddenLeaderstats.PlotUpgrade = math.clamp(coerceNumber(hiddenLeaderstats.PlotUpgrade, 0), 0, PlotUpgradeConfig.MaxLevel)
 	hiddenLeaderstats.Speed = sanitizeSpeed(hiddenLeaderstats.Speed, defaultSpeed)
 	hiddenLeaderstats.Tutorial = coerceBoolean(hiddenLeaderstats.Tutorial, false)
+	hiddenLeaderstats.TutorialSkipped = coerceBoolean(hiddenLeaderstats.TutorialSkipped, false)
+	hiddenLeaderstats.TutorialInProgress = coerceBoolean(hiddenLeaderstats.TutorialInProgress, false)
+	if typeof(hiddenLeaderstats.TutorialCurrentStep) ~= "string" then
+		hiddenLeaderstats.TutorialCurrentStep = ""
+	end
+	if hiddenLeaderstats.Tutorial == true then
+		hiddenLeaderstats.TutorialInProgress = false
+		hiddenLeaderstats.TutorialCurrentStep = ""
+	end
 	hiddenLeaderstats.TutorialCrewMemberGranted = coerceBoolean(
 		hiddenLeaderstats.TutorialCrewMemberGranted or hiddenLeaderstats.TutorialBrainrotGranted,
 		false

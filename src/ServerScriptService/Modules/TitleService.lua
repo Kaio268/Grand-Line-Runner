@@ -432,7 +432,7 @@ local function publishEquippedTitle(player, titleId)
 	player:SetAttribute(EQUIPPED_TITLE_ATTRIBUTE, normalizedTitleId ~= NONE_EQUIPPED and normalizedTitleId or nil)
 	player:SetAttribute(
 		EQUIPPED_TITLE_DISPLAY_ATTRIBUTE,
-		titleDefinition and tostring(titleDefinition.DisplayName or normalizedTitleId) or nil
+		titleDefinition and (TitlesConfig.GetDisplayName(normalizedTitleId) or normalizedTitleId) or nil
 	)
 
 	return normalizedTitleId

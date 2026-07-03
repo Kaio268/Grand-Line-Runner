@@ -1,6 +1,9 @@
 local FirstTimeTutorial = {
 	Version = 1,
 	CompletionPath = "HiddenLeaderstats.Tutorial",
+	SkippedPath = "HiddenLeaderstats.TutorialSkipped",
+	InProgressPath = "HiddenLeaderstats.TutorialInProgress",
+	CurrentStepPath = "HiddenLeaderstats.TutorialCurrentStep",
 
 	TutorialCrewMember = {
 		Name = "Mask Dancer",
@@ -78,6 +81,21 @@ local FirstTimeTutorial = {
 function FirstTimeTutorial.GetStep(index)
 	local numericIndex = math.floor(tonumber(index) or 0)
 	return FirstTimeTutorial.Steps[numericIndex]
+end
+
+function FirstTimeTutorial.GetStepIndexById(stepId)
+	stepId = tostring(stepId or "")
+	if stepId == "" then
+		return nil
+	end
+
+	for index, step in ipairs(FirstTimeTutorial.Steps) do
+		if tostring(step.Id or "") == stepId then
+			return index
+		end
+	end
+
+	return nil
 end
 
 function FirstTimeTutorial.GetStepCount()

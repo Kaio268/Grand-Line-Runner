@@ -65,6 +65,16 @@ local function graphemes(s: string): { string }
 	return out
 end
 
+local function escapeRichText(text: string): string
+	text = tostring(text or "")
+	text = string.gsub(text, "&", "&amp;")
+	text = string.gsub(text, "<", "&lt;")
+	text = string.gsub(text, ">", "&gt;")
+	text = string.gsub(text, '"', "&quot;")
+	text = string.gsub(text, "'", "&apos;")
+	return text
+end
+
 export type TagStyle = {
 	color: Color3?,
 	gradient: { colors: { Color3 } }?,
@@ -81,10 +91,10 @@ local function buildStyledTag(text: string, style: TagStyle?, timeNow: number): 
 	local makeBold = (style.bold ~= false)
 	local spaceAfter = (style.spaceAfter ~= false)
 
-	local inner = useBrackets and ("[" .. text .. "]") or text
+	local inner = useBrackets and ("[" .. tostring(text or "") .. "]") or tostring(text or "")
 
 	if style.color and not style.gradient then
-		local tag = string.format('<font color="%s">%s</font>', hex(style.color), inner)
+		local tag = string.format('<font color="%s">%s</font>', hex(style.color), escapeRichText(inner))
 		if makeBold then
 			tag = "<b>" .. tag .. "</b>"
 		end
@@ -106,7 +116,7 @@ local function buildStyledTag(text: string, style: TagStyle?, timeNow: number): 
 			local charOffset = (i - 1) * 0.1
 			t = (t + phase + charOffset) % 1
 			local c = colorAt(gradient.colors, t)
-			buff[i] = string.format('<font color="%s">%s</font>', hex(c), ch)
+			buff[i] = string.format('<font color="%s">%s</font>', hex(c), escapeRichText(ch))
 		end
 
 		local tag = table.concat(buff)
@@ -116,7 +126,7 @@ local function buildStyledTag(text: string, style: TagStyle?, timeNow: number): 
 		return tag .. (spaceAfter and " " or "")
 	end
 
-	local tag = inner
+	local tag = escapeRichText(inner)
 	if makeBold then
 		tag = "<b>" .. tag .. "</b>"
 	end
@@ -175,7 +185,7 @@ function TagManager:_equippedTitleTag(player: Player, timeNow: number): (string?
 		return nil, false
 	end
 
-	local displayName = tostring(titleDefinition.DisplayName or equippedTitleId)
+	local displayName = Titles.GetDisplayName(equippedTitleId) or ""
 	if displayName == "" then
 		return nil, false
 	end
@@ -250,7 +260,7 @@ local function hasVIP(player: Player): boolean
 end
 
 local function formatDisplayName(player: Player): string
-	local displayName = player.DisplayName or player.Name
+	local displayName = escapeRichText(player.DisplayName or player.Name)
 	if hasVIP(player) then
 		return string.format('<font color="%s"><b>%s</b></font>', hex(Color3.fromRGB(255, 218, 88)), displayName)
 	end

@@ -554,8 +554,35 @@ Titles.TierOrder = TIER_ORDER
 Titles.TierAliases = TIER_ALIASES
 Titles.Tiers = TIERS
 
+local function sanitizeDisplayName(value)
+	local text = tostring(value or "")
+	text = string.gsub(text, "[%c\r\n]", " ")
+	text = string.gsub(text, "[%[%]<>]", "")
+	text = string.gsub(text, "%s+", " ")
+	text = text:match("^%s*(.-)%s*$") or ""
+	if #text > 48 then
+		text = string.sub(text, 1, 48)
+		text = text:match("^(.-)%s*$") or text
+	end
+	return text
+end
+
 function Titles.Get(titleId)
 	return BY_ID[titleId]
+end
+
+function Titles.SanitizeDisplayName(value)
+	return sanitizeDisplayName(value)
+end
+
+function Titles.GetDisplayName(titleId)
+	local definition = Titles.Get(titleId)
+	if typeof(definition) ~= "table" then
+		return nil
+	end
+
+	local displayName = sanitizeDisplayName(definition.DisplayName or definition.Id or titleId)
+	return if displayName ~= "" then displayName else nil
 end
 
 function Titles.GetAll()

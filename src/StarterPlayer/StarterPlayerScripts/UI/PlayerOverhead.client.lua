@@ -20,6 +20,7 @@ local BOARD_ATTRIBUTES = {
 	"LB_TotalMoney",
 	"LB_TotalSpeed",
 	"LB_Bounty",
+	"EquippedTitleId",
 }
 
 local HORO_ATTRIBUTES = {
@@ -396,6 +397,7 @@ local function buildEntries(now)
 				key = key,
 				adornee = adornee,
 				playerName = player.Name,
+				equippedTitleId = player:GetAttribute("EquippedTitleId"),
 				balance = currencyValue and currencyValue.Value or 0,
 				rebirths = rebirthsValue and rebirthsValue.Value or 0,
 				beliBoostRemaining = beliBoostValue and beliBoostValue.Value or 0,
