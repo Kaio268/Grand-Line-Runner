@@ -1036,6 +1036,39 @@ local function getInstanceWorldPosition(instance)
 	return nil
 end
 
+local function getGuideBasePart(instance)
+	if not instance or not instance.Parent then
+		return nil
+	end
+
+	if instance:IsA("BasePart") then
+		return instance
+	end
+
+	if instance:IsA("Attachment") then
+		local parent = instance.Parent
+		return if parent and parent:IsA("BasePart") then parent else nil
+	end
+
+	if instance:IsA("Model") then
+		local primaryPart = instance.PrimaryPart
+		if primaryPart and primaryPart:IsA("BasePart") then
+			return primaryPart
+		end
+
+		for _, childName in ipairs({ "HumanoidRootPart", "RootPart", "Handle" }) do
+			local part = instance:FindFirstChild(childName, true)
+			if part and part:IsA("BasePart") then
+				return part
+			end
+		end
+
+		return instance:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	return instance:FindFirstChildWhichIsA("BasePart", true)
+end
+
 local function getTutorialExtractionPart(refs)
 	refs = refs or MapResolver.GetRefs({
 		context = "FirstTimeTutorialService",
@@ -1157,6 +1190,21 @@ end
 
 local function getModelWorldPosition(model)
 	return getInstanceWorldPosition(model)
+end
+
+local function getGuideOffset(targetKind)
+	targetKind = tostring(targetKind or "")
+	if targetKind == "crew_member" then
+		return Vector3.new(0, -0.6, 0)
+	elseif targetKind == "stand_interaction" then
+		return Vector3.new(0, 0.25, 0)
+	elseif targetKind == "stand_income" then
+		return Vector3.new(0, 0.25, 0)
+	elseif targetKind == "speed_upgrade" then
+		return Vector3.new(0, -0.6, 0)
+	end
+
+	return Vector3.new(0, -0.35, 0)
 end
 
 local ObjectiveTargetResolvers = {}
@@ -1307,7 +1355,9 @@ local function buildStandObjectiveTarget(player, standModel)
 		return nil
 	end
 
-	local position = getInstanceWorldPosition(handle) or getInstanceWorldPosition(standModel)
+	local claimHitBox = ShipSlotService.GetClaimHitBox(standModel)
+	local guidePart = getGuideBasePart(claimHitBox) or handle
+	local position = getInstanceWorldPosition(guidePart) or getInstanceWorldPosition(handle) or getInstanceWorldPosition(standModel)
 	if not position then
 		return nil
 	end
@@ -1320,6 +1370,37 @@ local function buildStandObjectiveTarget(player, standModel)
 		position = position,
 		standName = standName,
 		promptName = prompt and prompt.Name or "",
+		guidePart = guidePart,
+		guideOffset = if claimHitBox then getGuideOffset("stand_income") else getGuideOffset("stand_interaction"),
+	}
+end
+
+local function buildStandIncomeObjectiveTarget(player, standModel)
+	if not standModel or not standModel:IsA("Model") then
+		return nil
+	end
+
+	local standName = tostring(standModel.Name)
+	if standName == "" or getStandCrewMemberName(player, standName) == "" then
+		return nil
+	end
+
+	local claimHitBox = ShipSlotService.GetClaimHitBox(standModel)
+	local handle = select(1, getStandPromptRefs(standModel))
+	local guidePart = getGuideBasePart(claimHitBox) or getGuideBasePart(handle) or getGuideBasePart(standModel)
+	local position = getInstanceWorldPosition(guidePart) or getInstanceWorldPosition(handle) or getInstanceWorldPosition(standModel)
+	if not position then
+		return nil
+	end
+
+	return {
+		id = "stand_income_" .. standName,
+		kind = "stand_income",
+		label = "Collect Beli",
+		position = position,
+		standName = standName,
+		guidePart = guidePart,
+		guideOffset = getGuideOffset("stand_income"),
 	}
 end
 
@@ -1356,6 +1437,26 @@ local function getPromptWorldPosition(prompt)
 	return getInstanceWorldPosition(model)
 end
 
+local function getPromptGuidePart(prompt)
+	local parent = prompt and prompt.Parent
+	if not parent then
+		return nil
+	end
+
+	if parent:IsA("BasePart") then
+		return parent
+	end
+	if parent:IsA("Attachment") then
+		local attachmentParent = parent.Parent
+		if attachmentParent and attachmentParent:IsA("BasePart") then
+			return attachmentParent
+		end
+	end
+
+	local model = parent:FindFirstAncestorOfClass("Model")
+	return getGuideBasePart(model or parent)
+end
+
 local function buildSpeedUpgradeObjectiveTarget(prompt)
 	if not prompt or not prompt:IsA("ProximityPrompt") then
 		return nil
@@ -1378,6 +1479,8 @@ local function buildSpeedUpgradeObjectiveTarget(prompt)
 		label = "Frank",
 		position = position,
 		promptName = tostring(prompt.Name or ""),
+		guidePart = getPromptGuidePart(prompt),
+		guideOffset = getGuideOffset("speed_upgrade"),
 	}
 end
 
@@ -1484,6 +1587,8 @@ ObjectiveTargetResolvers.pickup_crew_member = function(player, session)
 		kind = "crew_member",
 		label = label,
 		position = position,
+		guidePart = getGuideBasePart(model),
+		guideOffset = getGuideOffset("crew_member"),
 	}
 end
 
@@ -1503,6 +1608,8 @@ ObjectiveTargetResolvers.extract_crew_member = function(player, session)
 			kind = "extraction",
 			label = "Extraction Zone",
 			position = position,
+			guidePart = getGuideBasePart(extractionPart),
+			guideOffset = getGuideOffset("extraction"),
 		}
 	end
 
@@ -1521,6 +1628,8 @@ ObjectiveTargetResolvers.extract_crew_member = function(player, session)
 		kind = "crew_member",
 		label = "Tutorial Crewmate",
 		position = position,
+		guidePart = getGuideBasePart(model),
+		guideOffset = getGuideOffset("crew_member"),
 	}
 end
 
@@ -1548,7 +1657,7 @@ ObjectiveTargetResolvers.collect_beli = function(player, session)
 	local standName = getPlacedTutorialStandName(player, session)
 	local standModel = findOwnedStandModel(player, standName)
 	if standModel then
-		return buildStandObjectiveTarget(player, standModel)
+		return buildStandIncomeObjectiveTarget(player, standModel)
 	end
 
 	return nil

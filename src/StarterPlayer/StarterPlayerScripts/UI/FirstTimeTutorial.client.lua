@@ -8,6 +8,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local TutorialConfig = require(Modules:WaitForChild("Configs"):WaitForChild("FirstTimeTutorial"))
+local TutorialGuideBeamController = require(script.Parent:WaitForChild("TutorialGuideBeamController"))
 local TutorialObjectiveIndicatorController = require(script.Parent:WaitForChild("TutorialObjectiveIndicatorController"))
 
 local REQUEST_REMOTE_NAME = TutorialConfig.Remotes.RequestName
@@ -33,6 +34,7 @@ local objectiveController = TutorialObjectiveIndicatorController.new(playerGui, 
 	DisplayOrder = 181,
 	ZIndex = 184,
 })
+local guideBeamController = TutorialGuideBeamController.new(player)
 
 local destroyed = false
 local renderQueued = false
@@ -261,6 +263,7 @@ local function cleanupCompletedTutorialUi()
 		tutorialGui.Enabled = false
 	end
 	objectiveController:Clear()
+	guideBeamController:Clear()
 end
 
 local function applyTutorialGuiState(state)
@@ -446,12 +449,11 @@ local function renderObjectiveIndicator(state)
 	local hasTarget = active and typeof(state.target) == "table"
 
 	if hasTarget then
-		objectiveController:SetTarget(state.target, {
-			ShowPath = true,
-			ZIndex = 184,
-		})
+		objectiveController:Clear()
+		guideBeamController:SetTarget(state.target)
 	else
 		objectiveController:Clear()
+		guideBeamController:Clear()
 	end
 end
 
@@ -513,6 +515,8 @@ requestAdvance = function()
 		return
 	end
 
+	guideBeamController:Clear()
+
 	if not requestRemote then
 		PopUpModule:Local_SendPopUp("Tutorial service is starting.", Color3.fromRGB(255, 104, 104), Color3.fromRGB(0, 0, 0), 3, true)
 		return
@@ -542,6 +546,8 @@ requestClaimRewards = function()
 	if advanceRequestInFlight then
 		return
 	end
+
+	guideBeamController:Clear()
 
 	if not requestRemote then
 		PopUpModule:Local_SendPopUp("Tutorial service is starting.", Color3.fromRGB(255, 104, 104), Color3.fromRGB(0, 0, 0), 3, true)
@@ -708,4 +714,5 @@ script.Destroying:Connect(function()
 	disconnectButtonConnections()
 	cleanupCompletedTutorialUi()
 	objectiveController:Destroy()
+	guideBeamController:Destroy()
 end)
