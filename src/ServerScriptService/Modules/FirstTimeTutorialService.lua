@@ -1207,6 +1207,22 @@ local function getGuideOffset(targetKind)
 	return Vector3.new(0, -0.35, 0)
 end
 
+local function getGuideTopSurfaceOffset(part, clearance)
+	if typeof(part) ~= "Instance" or not part:IsA("BasePart") then
+		return getGuideOffset("")
+	end
+
+	return Vector3.new(0, part.Size.Y * 0.5 + (tonumber(clearance) or 0.05), 0)
+end
+
+local function getGuideBottomSurfaceOffset(part, clearance)
+	if typeof(part) ~= "Instance" or not part:IsA("BasePart") then
+		return getGuideOffset("")
+	end
+
+	return Vector3.new(0, -part.Size.Y * 0.5 + (tonumber(clearance) or 0.05), 0)
+end
+
 local ObjectiveTargetResolvers = {}
 
 local function getObjectiveTargetCache(session, stepId)
@@ -1274,6 +1290,11 @@ local function getStandPromptRefs(standModel)
 	end
 
 	return handle, prompt
+end
+
+local function getStandPlacementGuidePart(standModel)
+	local handle = getStandPromptRefs(standModel)
+	return handle
 end
 
 local function findOwnedShipSlotModel(player, standName)
@@ -1355,8 +1376,11 @@ local function buildStandObjectiveTarget(player, standModel)
 		return nil
 	end
 
-	local claimHitBox = ShipSlotService.GetClaimHitBox(standModel)
-	local guidePart = getGuideBasePart(claimHitBox) or handle
+	local guidePart = getStandPlacementGuidePart(standModel)
+	if not guidePart then
+		return nil
+	end
+
 	local position = getInstanceWorldPosition(guidePart) or getInstanceWorldPosition(handle) or getInstanceWorldPosition(standModel)
 	if not position then
 		return nil
@@ -1371,7 +1395,7 @@ local function buildStandObjectiveTarget(player, standModel)
 		standName = standName,
 		promptName = prompt and prompt.Name or "",
 		guidePart = guidePart,
-		guideOffset = if claimHitBox then getGuideOffset("stand_income") else getGuideOffset("stand_interaction"),
+		guideOffset = getGuideTopSurfaceOffset(guidePart, 0.05),
 	}
 end
 
@@ -1400,7 +1424,7 @@ local function buildStandIncomeObjectiveTarget(player, standModel)
 		position = position,
 		standName = standName,
 		guidePart = guidePart,
-		guideOffset = getGuideOffset("stand_income"),
+		guideOffset = if claimHitBox then getGuideBottomSurfaceOffset(guidePart, 0.05) else getGuideTopSurfaceOffset(guidePart, 0.05),
 	}
 end
 

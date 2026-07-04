@@ -1040,6 +1040,9 @@ local function hotbarSlot(props)
 	local itemQuantity = item and math.floor(tonumber(item.quantity) or 0) or 0
 	local countQuantity = if hotbarStackQuantity > 0 then hotbarStackQuantity else itemQuantity
 	local countText = if hotbarStackQuantity > 1 then "x" .. tostring(countQuantity) else tostring(countQuantity)
+	local itemKind = item and tostring(item.kind or "") or ""
+	local isHotbarCrewmateSlot = itemKind == "CrewMember" or (item and item.quickSlotIndex ~= nil)
+	local showCount = item and not lockedSlot and countQuantity > 1 and not isHotbarCrewmateSlot
 	local variantTag = item and tostring(item.variantTag or item.VariantTag or "") or ""
 	local showVariantTag = item and item.showVariantTag == true and variantTag ~= "" and variantTag ~= "Normal"
 
@@ -1161,7 +1164,7 @@ local function hotbarSlot(props)
 				MinTextSize = 5,
 			}),
 		}) or nil,
-		Count = item and not lockedSlot and countQuantity > 1 and e("TextLabel", {
+		Count = showCount and e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 1),
 			AutomaticSize = Enum.AutomaticSize.XY,
 			BackgroundColor3 = Color3.fromRGB(6, 10, 18),
