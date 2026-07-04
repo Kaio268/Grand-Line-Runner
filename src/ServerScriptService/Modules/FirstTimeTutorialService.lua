@@ -290,6 +290,37 @@ local function getRootPosition(player)
 	return nil
 end
 
+local function getTutorialSpawnReferencePosition(player)
+	local rootPosition = getRootPosition(player)
+	if rootPosition then
+		return rootPosition, "HumanoidRootPart"
+	end
+
+	local character = player.Character
+	if character then
+		return character:GetPivot().Position, "CharacterPivot"
+	end
+
+	if typeof(ShipRuntimeService.GetPlayerSpawnCFrame) == "function" then
+		local spawnCFrame = ShipRuntimeService.GetPlayerSpawnCFrame(player)
+		if typeof(spawnCFrame) == "CFrame" then
+			return spawnCFrame.Position, "ShipSpawnCFrame"
+		end
+	end
+
+	if typeof(ShipRuntimeService.GetAssignedPosition) == "function" then
+		local assignedPosition = ShipRuntimeService.GetAssignedPosition(player)
+		if typeof(assignedPosition) == "Vector3" then
+			return assignedPosition, "AssignedShipPosition"
+		end
+		if typeof(assignedPosition) == "Instance" and assignedPosition:IsA("BasePart") then
+			return assignedPosition.Position, "AssignedShipPositionPart"
+		end
+	end
+
+	return nil, "Unavailable"
+end
+
 local function getNumberValue(player, folderName, valueName)
 	local folder = player:FindFirstChild(folderName)
 	local value = folder and folder:FindFirstChild(valueName)
@@ -453,6 +484,16 @@ end
 local function getTutorialCrewMemberGranted(player)
 	local granted, reason = DataManager:TryGetValue(player, TUTORIAL_CREW_MEMBER_GRANTED_PATH)
 	return reason == nil and granted == true
+end
+
+local function readTutorialFinalRewardsClaimed(player)
+	local claimed, reason = DataManager:TryGetValue(player, TUTORIAL_FINAL_REWARD_CLAIMED_PATH)
+	return claimed, reason
+end
+
+local function getTutorialFinalRewardsClaimed(player)
+	local claimed, reason = readTutorialFinalRewardsClaimed(player)
+	return reason == nil and claimed == true
 end
 
 local function countCrewMemberInstances(player)
@@ -1039,6 +1080,7 @@ local function spawnTutorialCrewMemberTarget(player, session)
 	end
 
 	local lifetime = math.max(60, tonumber(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.SpawnLifetime) or 900)
+	local referencePosition, referenceSource = getTutorialSpawnReferencePosition(player)
 	local clone, message = context.SpawnTutorialCrewMember({
 		Player = player,
 		Entry = {
@@ -1055,6 +1097,8 @@ local function spawnTutorialCrewMemberTarget(player, session)
 		Token = tostring(session.tutorialToken or ""),
 		RewardName = entry.FinalId,
 		Lifetime = lifetime,
+		PreferredPosition = referencePosition,
+		PreferredPositionSource = referenceSource,
 	})
 	if not clone then
 		return false, message or "Tutorial Crewmate spawn is not available yet."
@@ -1579,10 +1623,19 @@ local function buildState(player)
 	local session = sessions[player]
 	local completed = isTutorialCompleted(player)
 	local skipped = isTutorialSkipped(player)
-	if completed or not session or session.active ~= true then
+	local finalRewardsClaimed = getTutorialFinalRewardsClaimed(player)
+	local hasPendingFinalRewards = completed and not finalRewardsClaimed
+	local currentStep = getCurrentStep(session)
+	local canShowPendingFinalRewards = hasPendingFinalRewards
+		and session
+		and session.active == true
+		and currentStep
+		and tostring(currentStep.Id or "") == "final_rewards"
+
+	if skipped or not session or session.active ~= true or (completed and not canShowPendingFinalRewards) then
 		return {
 			active = false,
-			completed = completed,
+			completed = completed and finalRewardsClaimed,
 			skipped = skipped,
 			version = TutorialConfig.Version,
 			stepIndex = 0,
@@ -1599,10 +1652,10 @@ local function buildState(player)
 		skipped = false,
 		version = TutorialConfig.Version,
 		stepIndex = session.stepIndex,
-		stepId = tostring((getCurrentStep(session) or {}).Id or ""),
+		stepId = tostring((currentStep or {}).Id or ""),
 		totalSteps = TutorialConfig.GetStepCount(),
-		step = serializeStep(getCurrentStep(session)),
-		target = serializeObjectiveTarget(player, session, getCurrentStep(session)),
+		step = serializeStep(currentStep),
+		target = serializeObjectiveTarget(player, session, currentStep),
 		progress = session.progress or 0,
 		canAdvance = canAdvanceManually(session),
 		warning = session.warning,
@@ -1801,7 +1854,7 @@ local function claimCompletionRewards(player)
 
 	rewardClaimsInFlight[player] = true
 
-	local claimed, claimReadReason = DataManager:TryGetValue(player, TUTORIAL_FINAL_REWARD_CLAIMED_PATH)
+	local claimed, claimReadReason = readTutorialFinalRewardsClaimed(player)
 	if claimReadReason ~= nil then
 		rewardClaimsInFlight[player] = nil
 		session.warning = SAVE_FAILURE_MESSAGE
@@ -1942,6 +1995,11 @@ local function advanceTutorial(player)
 	end
 
 	if session.stepIndex >= TutorialConfig.GetStepCount() then
+		local step = getCurrentStep(session)
+		if step and tostring(step.Id or "") == "final_rewards" then
+			return false, "Claim your tutorial rewards first."
+		end
+
 		return completeTutorial(player)
 	end
 
@@ -1950,8 +2008,7 @@ local function advanceTutorial(player)
 end
 
 local function inferTutorialStepIndex(player, session)
-	local finalRewardsClaimed, finalRewardsReason = DataManager:TryGetValue(player, TUTORIAL_FINAL_REWARD_CLAIMED_PATH)
-	if finalRewardsReason == nil and finalRewardsClaimed == true then
+	if getTutorialFinalRewardsClaimed(player) then
 		return TutorialConfig.GetStepCount()
 	end
 
@@ -2028,12 +2085,16 @@ local function createSession(player)
 		return sessions[player]
 	end
 
-	if isTutorialCompleted(player) or isTutorialSkipped(player) then
+	local completed = isTutorialCompleted(player)
+	local finalRewardsClaimed = getTutorialFinalRewardsClaimed(player)
+	if isTutorialSkipped(player) or (completed and finalRewardsClaimed) then
 		pushState(player)
 		return nil
 	end
 
-	ensureTutorialStarterBeli(player)
+	if not completed then
+		ensureTutorialStarterBeli(player)
+	end
 
 	local session = {
 		active = true,
@@ -2049,10 +2110,14 @@ local function createSession(player)
 		buySpeedStartValue = getSpeedValue(player),
 	}
 	sessions[player] = session
-	reconcileTutorialCrewMemberGrant(player, session)
-	reconcileTutorialSpeedRecovery(player)
-	restoreGrantedTutorialReward(player, session)
-	startStep(player, resolveResumeStepIndex(player, session))
+	if completed then
+		startStep(player, getStepIndexById("final_rewards") or TutorialConfig.GetStepCount())
+	else
+		reconcileTutorialCrewMemberGrant(player, session)
+		reconcileTutorialSpeedRecovery(player)
+		restoreGrantedTutorialReward(player, session)
+		startStep(player, resolveResumeStepIndex(player, session))
+	end
 	return session
 end
 
@@ -2535,6 +2600,36 @@ end
 
 local function markCompletedFromValue(player)
 	local session = sessions[player]
+	if isTutorialSkipped(player) then
+		if session then
+			session.active = false
+			session.completed = true
+			session.warning = nil
+			cleanupTutorialTarget(player, session)
+		end
+		clearTutorialRuntimeAttributes(player)
+		pushState(player)
+		return
+	end
+
+	if not getTutorialFinalRewardsClaimed(player) then
+		local finalStepIndex = getStepIndexById("final_rewards") or TutorialConfig.GetStepCount()
+		if session and session.active == true then
+			if session.stepIndex ~= finalStepIndex then
+				startStep(player, finalStepIndex)
+			else
+				pushState(player)
+			end
+		else
+			task.defer(function()
+				if player.Parent == Players then
+					ensureSession(player)
+				end
+			end)
+		end
+		return
+	end
+
 	if session then
 		session.active = false
 		session.completed = true

@@ -14,7 +14,7 @@ Use this checklist before publishing the fresh release Main place or AFK Lobby p
 
 1. Confirm `src/ServerScriptService/Data/DataKeySecrets.lua` exists locally.
 2. Confirm the real secrets file is ignored and not tracked by Git.
-3. Confirm Production uses `KeyId = "prod-release-v1"`.
+3. Confirm Production uses `KeyId = "prod-v1"`.
 4. Confirm Production uses the intended release `DataKey`.
 5. Confirm Production does not use `DefaultKey_123`, blanks, `REPLACE_ME`, `YOUR_KEY_HERE`, or any placeholder text.
 6. Confirm Staging and Development use separate non-production keys.
@@ -31,7 +31,7 @@ Use this checklist before publishing the fresh release Main place or AFK Lobby p
 
 1. Start the Main place in Studio.
 2. Verify `DataEnvironment_Name = Production`.
-3. Verify `DataEnvironment_KeyId = prod-release-v1`.
+3. Verify `DataEnvironment_KeyId = prod-v1`.
 4. Verify `DataEnvironment_PlaceRole = Main`.
 5. Verify `DataEnvironment_BootModeValid = true`.
 6. Run `/datadiag` and compare key fingerprint/length without sharing the raw key.

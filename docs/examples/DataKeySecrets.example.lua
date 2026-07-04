@@ -1,6 +1,6 @@
 return {
 	Production = {
-		KeyId = "prod-release-v1",
+		KeyId = "prod-v1",
 		DataKey = "REPLACE_WITH_RELEASE_PRODUCTION_KEY",
 	},
 	Staging = {
@@ -8,7 +8,7 @@ return {
 		DataKey = "REPLACE_WITH_PRIVATE_STAGING_KEY",
 	},
 	Development = {
-		KeyId = "dev-local-v1",
+		KeyId = "dev-v1",
 		DataKey = "REPLACE_WITH_PRIVATE_DEVELOPMENT_KEY",
 	},
 	RecoveryStores = {

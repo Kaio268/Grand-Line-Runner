@@ -1627,41 +1627,120 @@ local function findFreeSlotRandom(data, now)
 	return candidates[rng:NextInteger(1, #candidates)]
 end
 
-local function pickRandomOffset(data, halfX, halfZ)
+local function isOffsetClear(data, offsetXZ)
 	local dist = data.Spacing
 	local dist2 = dist * dist
-	for _ = 1, 80 do
-		local x = rng:NextNumber(-halfX, halfX)
-		local z = rng:NextNumber(-halfZ, halfZ)
-		local ok = true
-		for slotIndex, occupiedModel in pairs(data.SlotOccupied) do
-			if occupiedModel then
-				local o = data.SlotOffsets[slotIndex]
-				if o then
-					local dx = x - o.X
-					local dz = z - o.Y
-					if (dx * dx + dz * dz) < dist2 then
-						ok = false
-						break
-					end
+	for slotIndex, occupiedModel in pairs(data.SlotOccupied) do
+		if occupiedModel then
+			local occupiedOffset = data.SlotOffsets[slotIndex]
+			if occupiedOffset then
+				local dx = offsetXZ.X - occupiedOffset.X
+				local dz = offsetXZ.Y - occupiedOffset.Y
+				if (dx * dx + dz * dz) < dist2 then
+					return false
 				end
 			end
 		end
-		if ok then
-			return Vector2.new(x, z)
+	end
+
+	return true
+end
+
+local function pickRandomOffset(data, halfX, halfZ)
+	for _ = 1, 80 do
+		local x = rng:NextNumber(-halfX, halfX)
+		local z = rng:NextNumber(-halfZ, halfZ)
+		local offsetXZ = Vector2.new(x, z)
+		if isOffsetClear(data, offsetXZ) then
+			return offsetXZ
 		end
 	end
 	return Vector2.new(rng:NextNumber(-halfX, halfX), rng:NextNumber(-halfZ, halfZ))
 end
 
-local function getTutorialSpawnDataCandidates()
+local function getFlatPartBasis(spawnPart)
+	local lookVector = spawnPart.CFrame.LookVector
+	local look = Vector3.new(lookVector.X, 0, lookVector.Z)
+	if look.Magnitude < 1e-4 then
+		look = Vector3.new(0, 0, -1)
+	else
+		look = look.Unit
+	end
+
+	local flatCFrame = CFrame.lookAt(spawnPart.Position, spawnPart.Position + look, Vector3.yAxis)
+	return flatCFrame.RightVector, flatCFrame.LookVector
+end
+
+local function getClosestOffsetOnSpawnPart(spawnPart, worldPosition, halfX, halfZ)
+	if not spawnPart or typeof(worldPosition) ~= "Vector3" then
+		return nil, nil, math.huge
+	end
+
+	local right, look = getFlatPartBasis(spawnPart)
+	local relative = worldPosition - spawnPart.Position
+	local offsetXZ = Vector2.new(
+		math.clamp(relative:Dot(right), -halfX, halfX),
+		math.clamp(relative:Dot(look), -halfZ, halfZ)
+	)
+	local surfacePosition = spawnPart.Position + right * offsetXZ.X + look * offsetXZ.Y
+	local delta = Vector3.new(surfacePosition.X - worldPosition.X, 0, surfacePosition.Z - worldPosition.Z)
+
+	return offsetXZ, surfacePosition, delta.Magnitude
+end
+
+local function pickTutorialOffset(data, halfX, halfZ, options)
+	local preferredPosition = options and options.PreferredPosition
+	if typeof(preferredPosition) ~= "Vector3" then
+		return nil, "missing_reference_position"
+	end
+
+	local targetOffset = getClosestOffsetOnSpawnPart(data.Part, preferredPosition, halfX, halfZ)
+	if not targetOffset then
+		return nil, "missing_reference_position"
+	end
+	if isOffsetClear(data, targetOffset) then
+		return targetOffset
+	end
+
+	local spacing = math.max(2, tonumber(data.Spacing) or 2)
+	for radiusStep = 1, 4 do
+		local radius = spacing * radiusStep
+		for angleIndex = 1, 12 do
+			local angle = (math.pi * 2) * (angleIndex / 12)
+			local offsetXZ = Vector2.new(
+				math.clamp(targetOffset.X + math.cos(angle) * radius, -halfX, halfX),
+				math.clamp(targetOffset.Y + math.sin(angle) * radius, -halfZ, halfZ)
+			)
+			if isOffsetClear(data, offsetXZ) then
+				return offsetXZ
+			end
+		end
+	end
+
+	return nil, "no_clear_nearby_offset"
+end
+
+local function getTutorialSpawnPointDistance(data, referencePosition)
+	if typeof(referencePosition) ~= "Vector3" or not data or not data.Part then
+		return math.huge
+	end
+
+	local halfX = math.max(0, data.Part.Size.X * 0.45)
+	local halfZ = math.max(0, data.Part.Size.Z * 0.45)
+	local _, _, distance = getClosestOffsetOnSpawnPart(data.Part, referencePosition, halfX, halfZ)
+	return distance
+end
+
+local function getTutorialSpawnDataCandidates(preferredPosition)
 	local firstBiome = {}
 	local indexedBiomes = {}
 	local anyBiome = {}
+	local allCandidates = {}
 
 	for i = 1, #partDataList do
 		local data = partDataList[i]
 		if data and not data.Disabled and reconcileSpawnData(data, "tutorial_candidate") then
+			allCandidates[#allCandidates + 1] = data
 			local biomeIndex = getSpawnPartBiomeIndex(data.Part)
 			if biomeIndex == FIRST_TUTORIAL_BIOME_INDEX then
 				firstBiome[#firstBiome + 1] = data
@@ -1676,8 +1755,9 @@ local function getTutorialSpawnDataCandidates()
 		end
 	end
 
-	local candidates = firstBiome
-	if #candidates == 0 and #indexedBiomes > 0 then
+	local hasPreferredPosition = typeof(preferredPosition) == "Vector3"
+	local candidates = if hasPreferredPosition then allCandidates else firstBiome
+	if not hasPreferredPosition and #candidates == 0 and #indexedBiomes > 0 then
 		table.sort(indexedBiomes, function(a, b)
 			if a.Index ~= b.Index then
 				return a.Index < b.Index
@@ -1695,14 +1775,14 @@ local function getTutorialSpawnDataCandidates()
 
 			candidates[#candidates + 1] = entry.Data
 		end
-	elseif #candidates == 0 then
+	elseif not hasPreferredPosition and #candidates == 0 then
 		candidates = anyBiome
 	end
 
-	local referencePosition = hitBox and hitBox.Position or nil
+	local referencePosition = if hasPreferredPosition then preferredPosition else hitBox and hitBox.Position or nil
 	table.sort(candidates, function(a, b)
-		local aDistance = if referencePosition then (a.Part.Position - referencePosition).Magnitude else 0
-		local bDistance = if referencePosition then (b.Part.Position - referencePosition).Magnitude else 0
+		local aDistance = getTutorialSpawnPointDistance(a, referencePosition)
+		local bDistance = getTutorialSpawnPointDistance(b, referencePosition)
 		if math.abs(aDistance - bDistance) > 0.001 then
 			return aDistance < bDistance
 		end
@@ -1715,12 +1795,12 @@ end
 
 local function reserveTutorialSlot(data)
 	if not reconcileSpawnData(data, "tutorial_reserve_preflight") then
-		return nil
+		return nil, "spawn_data_invalid"
 	end
 
 	local slotIndex = findFreeSlotRandom(data, os.clock())
 	if slotIndex then
-		return slotIndex
+		return slotIndex, nil
 	end
 
 	slotIndex = SpawnerConfig.MaxPerPart + 1
@@ -1728,7 +1808,7 @@ local function reserveTutorialSlot(data)
 		slotIndex += 1
 	end
 
-	return slotIndex
+	return slotIndex, "tutorial_overflow_slot"
 end
 
 local function spawnTutorialCrewMemberOnData(data, options)
@@ -1781,14 +1861,20 @@ local function spawnTutorialCrewMemberOnData(data, options)
 	local effZ = data.Part.Size.Z * 0.9
 	local halfX = math.max(0, (effX / 2) - (finalSize.X / 2))
 	local halfZ = math.max(0, (effZ / 2) - (finalSize.Z / 2))
-	local slotIndex = reserveTutorialSlot(data)
+	local slotIndex, slotReason = reserveTutorialSlot(data)
 	if not slotIndex then
 		pcall(function()
 			clone:Destroy()
 		end)
-		return nil, "Tutorial spawn part is no longer valid."
+		return nil, slotReason or "Tutorial spawn part is no longer valid."
 	end
-	local offsetXZ = pickRandomOffset(data, halfX, halfZ)
+	local offsetXZ, offsetReason = pickTutorialOffset(data, halfX, halfZ, options)
+	if not offsetXZ then
+		pcall(function()
+			clone:Destroy()
+		end)
+		return nil, offsetReason or "Tutorial spawn part could not fit the Crewmate."
+	end
 	local yaw = rng:NextNumber(0, math.pi * 2)
 
 	data.SlotOffsets[slotIndex] = offsetXZ
@@ -1871,26 +1957,46 @@ local function spawnTutorialCrewMember(options)
 	if typeof(options) ~= "table" then
 		return nil, "Tutorial spawn request is invalid."
 	end
-
-	local candidates = getTutorialSpawnDataCandidates()
-	if #candidates == 0 then
-		return nil, "Biome 1 CrewMember spawns are still loading."
+	if typeof(options.PreferredPosition) ~= "Vector3" then
+		return nil, "Tutorial spawn reference position is not available yet."
 	end
 
+	local candidates = getTutorialSpawnDataCandidates(options.PreferredPosition)
+	if #candidates == 0 then
+		return nil, "CrewMember spawns are still loading."
+	end
+
+	local checkedCount = 0
+	local rejected = {}
 	for _, data in ipairs(candidates) do
+		local distance = getTutorialSpawnPointDistance(data, options.PreferredPosition)
+		checkedCount += 1
 		local ok, modelOrMessage, message = xpcall(function()
 			return spawnTutorialCrewMemberOnData(data, options)
 		end, debug.traceback)
 
 		if ok and modelOrMessage then
+			spawnTrace(
+				"tutorialSpawn selected player=%s referenceSource=%s reference=%s spawnPart=%s distance=%.2f candidatesChecked=%d totalCandidates=%d rejectedCloser=%s",
+				options.Player and options.Player.Name or "<nil>",
+				tostring(options.PreferredPositionSource or "Unknown"),
+				formatVector3(options.PreferredPosition),
+				formatInstancePath(data.Part),
+				distance,
+				checkedCount,
+				#candidates,
+				if #rejected > 0 then table.concat(rejected, "; ") else "<none>"
+			)
 			return modelOrMessage, nil
 		elseif not ok then
+			rejected[#rejected + 1] = string.format("%s:exception", formatInstancePath(data and data.Part))
 			spawnError(
 				"tutorialSpawn failed spawnPart=%s error=%s",
 				formatInstancePath(data and data.Part),
 				tostring(modelOrMessage)
 			)
 		else
+			rejected[#rejected + 1] = string.format("%s:%s", formatInstancePath(data and data.Part), tostring(message or "unknown"))
 			spawnWarnThrottled(
 				"tutorial_spawn_failed_" .. formatInstancePath(data and data.Part),
 				"tutorialSpawn skipped spawnPart=%s reason=%s",
@@ -1900,7 +2006,15 @@ local function spawnTutorialCrewMember(options)
 		end
 	end
 
-	return nil, "Tutorial Crewmate spawn is not available yet."
+	spawnTrace(
+		"tutorialSpawn unavailable player=%s referenceSource=%s reference=%s totalCandidates=%d rejected=%s",
+		options.Player and options.Player.Name or "<nil>",
+		tostring(options.PreferredPositionSource or "Unknown"),
+		formatVector3(options.PreferredPosition),
+		#candidates,
+		if #rejected > 0 then table.concat(rejected, "; ") else "<none>"
+	)
+	return nil, "No nearby tutorial Crewmate spawn point is available yet."
 end
 
 ctx.SpawnTutorialCrewMember = spawnTutorialCrewMember

@@ -212,12 +212,12 @@ local Economy = {
 
 	AFKTeleport = {
 		Enabled = true,
-		MainPlaceId = 111129977331443,
-		AFKPlaceId = 135767110031089,
+		MainPlaceId = 128382161567643,
+		AFKPlaceId = 84534597236418,
 		PlacePairsByEnvironment = {
 			Production = {
-				MainPlaceId = 111129977331443,
-				AFKPlaceId = 135767110031089,
+				MainPlaceId = 128382161567643,
+				AFKPlaceId = 84534597236418,
 			},
 			Staging = {
 				MainPlaceId = 110640828025742,

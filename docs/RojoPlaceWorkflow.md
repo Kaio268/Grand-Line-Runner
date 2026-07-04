@@ -2,8 +2,8 @@
 
 Grand Tide Rush has two Roblox places in one experience:
 
-- Main Place, `Grand Tide Rush`: `111129977331443`
-- AFK Lobby Place, `AFK Lobby`: `135767110031089`
+- Main Place, `Grand Tide Rush`: `128382161567643`
+- AFK Lobby Place, `AFK Lobby`: `84534597236418`
 
 Use one repo, but connect each place to its own Rojo project.
 
@@ -19,7 +19,7 @@ Use one repo, but connect each place to its own Rojo project.
    rojo serve default.project.json
    ```
 4. Connect Studio to `grand-tide-rush-main`.
-5. Publish only to place `111129977331443`.
+5. Publish only to place `128382161567643`.
 
 ## AFK Lobby
 
@@ -33,7 +33,7 @@ Use one repo, but connect each place to its own Rojo project.
    rojo serve afk.project.json
    ```
 4. Connect Studio to `grand-tide-rush-afk`.
-5. Publish only to place `135767110031089`.
+5. Publish only to place `84534597236418`.
 
 ## Safeguards
 

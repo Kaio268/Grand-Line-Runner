@@ -6,9 +6,9 @@ Grand Tide Rush uses ProfileStore with a datastore name resolved from `DataKeySe
 
 The public policy lives in `ServerScriptService.Data.DataEnvironment`. It contains place IDs, place roles, environment names, validation rules, and diagnostics. It does not contain raw datastore keys.
 
-- Production main place: `111129977331443`
-- Production AFK place: `135767110031089`
-- Required production key id: `prod-release-v1`
+- Production main place: `128382161567643`
+- Production AFK place: `84534597236418`
+- Required production key id: `prod-v1`
 
 Production main and AFK both resolve the same `Production` secret entry. That keeps both places on the same release production datastore environment when they are places inside the same Roblox experience/universe.
 
@@ -22,7 +22,7 @@ src/ServerScriptService/Data/DataKeySecrets.lua
 
 This file is git-ignored. It must not be committed, pasted into public logs, or shared in screenshots.
 
-Use `src/ServerScriptService/Data/DataKeySecrets.example.lua` or `docs/examples/DataKeySecrets.example.lua` as the shape. For the fresh release experience, production should use an intentional release namespace such as `GrandTideRush_Production_v1` with `KeyId = "prod-release-v1"`.
+Use `src/ServerScriptService/Data/DataKeySecrets.example.lua` or `docs/examples/DataKeySecrets.example.lua` as the shape. For the fresh release experience, production should use `DataKey = "EscapeTsunamisForOnePiece_Production_v1"` with `KeyId = "prod-v1"`.
 
 The `DataKey` is just the ProfileStore datastore namespace string used by code. It does not need to be created or registered in Roblox Dashboard. A new Roblox experience/universe starts with fresh data even if the same `DataKey` string is used elsewhere. Main and AFK share data only when they are places in the same experience/universe and use the same Production `DataKey`.
 
@@ -35,7 +35,7 @@ Live servers fail before profile startup when:
 - `DataKeySecrets.lua` is missing.
 - The selected environment entry is missing.
 - `DataKey` or `KeyId` is blank, whitespace-only, `DefaultKey_123`, or another placeholder.
-- A production place is not using `prod-release-v1`.
+- A production place is not using `prod-v1`.
 - A live place ID is not mapped to an environment.
 - The DataManager boot mode does not match the place role.
 
@@ -48,7 +48,7 @@ Studio sets diagnostics and warns before errors so publish problems are visible 
 - `DataEnvironment_Valid`
 - `DataEnvironment_BootModeValid`
 
-Raw `DataKey` values are never written to attributes or logs.
+Raw `DataKey` values are not written to attributes. `DataEnvironment.ResolveDataKey()` logs the resolved environment, place ID, and DataKey once at server startup for publish verification.
 
 ## Publish Checklist
 
@@ -60,7 +60,7 @@ Before publishing either production place:
 4. Run the AFK Rojo build from `afk.project.json`.
 5. Run `tools/validate-startup-build.ps1` against the fresh build outputs.
 6. In Studio, verify `DataEnvironment_Name` is `Production`.
-7. Verify `DataEnvironment_KeyId` is `prod-release-v1`.
+7. Verify `DataEnvironment_KeyId` is `prod-v1`.
 8. Verify main reports `DataEnvironment_PlaceRole = Main`.
 9. Verify AFK reports `DataEnvironment_PlaceRole = AFK`.
 10. Run `/datadiag` only and compare key fingerprint/length without exposing the raw key.

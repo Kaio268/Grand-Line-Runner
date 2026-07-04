@@ -56,6 +56,7 @@ local tutorialRefs = {
 	normalStepsFrame = nil,
 	finalStepFrame = nil,
 	finalRewardFrame = nil,
+	finalRewardPath = "",
 	containersByStep = {},
 	stepsByIndex = {},
 	allFrames = {},
@@ -117,21 +118,6 @@ local function findDescendantGuiButtons(parent, buttonName)
 	return buttons
 end
 
-local function findFirstActionButton(parent, excludedNames)
-	if not parent then
-		return nil
-	end
-
-	excludedNames = excludedNames or {}
-	for _, descendant in ipairs(parent:GetDescendants()) do
-		if descendant:IsA("GuiButton") and not excludedNames[descendant.Name] then
-			return descendant
-		end
-	end
-
-	return nil
-end
-
 local function setVisible(instance, visible)
 	if instance and instance:IsA("GuiObject") then
 		instance.Visible = visible
@@ -151,6 +137,54 @@ local function resolveStepFrame(container, stepName, path)
 	return stepFrame
 end
 
+local function resolveOptionalGuiObject(parent, childName)
+	local child = parent and parent:FindFirstChild(childName)
+	if child and child:IsA("GuiObject") then
+		return child
+	end
+
+	return nil
+end
+
+local function resolveFinalRewardFrame(tutorialRoot, finalStepFrame)
+	local candidates = {
+		{
+			parent = tutorialRoot,
+			name = "StepFinalRewards",
+			path = "StepFinalRewards",
+		},
+		{
+			parent = tutorialRoot,
+			name = "StepFinalReward",
+			path = "StepFinalReward",
+		},
+		{
+			parent = finalStepFrame,
+			name = "StepFinalRewards",
+			path = "FinalStepFrame.StepFinalRewards",
+		},
+		{
+			parent = finalStepFrame,
+			name = "StepFinalReward",
+			path = "FinalStepFrame.StepFinalReward",
+		},
+	}
+
+	for _, candidate in ipairs(candidates) do
+		local frame = resolveOptionalGuiObject(candidate.parent, candidate.name)
+		if frame then
+			return frame, candidate.path
+		end
+	end
+
+	if finalStepFrame and finalStepFrame:FindFirstChild("ClaimRewards") then
+		return finalStepFrame, "FinalStepFrame"
+	end
+
+	warnMissingGuiPath("StepFinalRewards or FinalStepFrame.ClaimRewards")
+	return nil, ""
+end
+
 local function resolveTutorialGuiRefs()
 	if not tutorialGui then
 		return
@@ -163,7 +197,7 @@ local function resolveTutorialGuiRefs()
 		warnMissingGuiPath("FinalStepFrame (not a GuiObject)")
 		finalStepFrame = nil
 	end
-	local finalRewardFrame = findGuiChild(tutorialGui, "StepFinalReward", "StepFinalReward")
+	local finalRewardFrame, finalRewardPath = resolveFinalRewardFrame(tutorialGui, finalStepFrame)
 	local welcomeStep = resolveStepFrame(firstStepFrame, "WelcomeStep", "FirstStepFrame.WelcomeStep")
 	local step1Crewmate = resolveStepFrame(normalStepsFrame, "Step1_Crewmate", "NormalStepsFrame.Step1_Crewmate")
 	local step2BringHome = resolveStepFrame(normalStepsFrame, "Step2_BringHome", "NormalStepsFrame.Step2_BringHome")
@@ -175,6 +209,7 @@ local function resolveTutorialGuiRefs()
 	tutorialRefs.normalStepsFrame = normalStepsFrame
 	tutorialRefs.finalStepFrame = finalStepFrame
 	tutorialRefs.finalRewardFrame = finalRewardFrame
+	tutorialRefs.finalRewardPath = finalRewardPath
 	tutorialRefs.containersByStep = {
 		[1] = firstStepFrame,
 		[2] = normalStepsFrame,
@@ -329,14 +364,26 @@ local function connectButtonOnce(connectedButtons, button, callback)
 end
 
 local function findFinalRewardButton(stepFrame)
-	local claimRewards = findGuiChild(stepFrame, "ClaimRewards", "StepFinalReward.ClaimRewards")
-	local buttonFrame = findGuiChild(claimRewards, "ButtonFrame", "StepFinalReward.ClaimRewards.ButtonFrame")
-	local button = findGuiChild(buttonFrame, "SetSailButton", "StepFinalReward.ClaimRewards.ButtonFrame.SetSailButton")
-	if button and not button:IsA("GuiButton") then
-		warnMissingGuiPath("StepFinalReward.ClaimRewards.ButtonFrame.SetSailButton (not a GuiButton)")
+	local finalRewardPath = if tutorialRefs.finalRewardPath ~= "" then tutorialRefs.finalRewardPath else "StepFinalRewards"
+	local claimRewards = findGuiChild(stepFrame, "ClaimRewards", finalRewardPath .. ".ClaimRewards")
+	if claimRewards and claimRewards:IsA("GuiButton") then
+		return claimRewards
+	end
+	if claimRewards and not claimRewards:IsA("GuiObject") then
+		warnMissingGuiPath(finalRewardPath .. ".ClaimRewards (not a GuiObject)")
 		return nil
 	end
-	return button
+
+	local buttonFrame = findGuiChild(claimRewards, "ButtonFrame", finalRewardPath .. ".ClaimRewards.ButtonFrame")
+	local setSailButton = findGuiChild(buttonFrame, "SetSailButton", finalRewardPath .. ".ClaimRewards.ButtonFrame.SetSailButton")
+	if setSailButton and setSailButton:IsA("GuiButton") then
+		return setSailButton
+	end
+	if setSailButton then
+		warnMissingGuiPath(finalRewardPath .. ".ClaimRewards.ButtonFrame.SetSailButton (not a GuiButton)")
+	end
+
+	return nil
 end
 
 local function connectSkipButton(connectedButtons, stepFrame)

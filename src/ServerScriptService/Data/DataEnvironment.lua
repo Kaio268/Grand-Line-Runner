@@ -11,13 +11,13 @@ local PLACE_ROLE_MAIN = "Main"
 local PLACE_ROLE_AFK = "AFK"
 local PLACE_ROLE_DEVELOPMENT = "Development"
 
-local PRODUCTION_MAIN_PLACE_ID = 111129977331443
-local PRODUCTION_AFK_PLACE_ID = 135767110031089
-local PRODUCTION_UNIVERSE_ID = 10268332509
+local PRODUCTION_MAIN_PLACE_ID = 128382161567643
+local PRODUCTION_AFK_PLACE_ID = 84534597236418
+local PRODUCTION_UNIVERSE_ID = 10435034175
 local STAGING_MAIN_PLACE_ID = 110640828025742
 local STAGING_AFK_PLACE_ID = 122987301330026
 local STAGING_UNIVERSE_ID = 10040962360
-local REQUIRED_PRODUCTION_KEY_ID = "prod-release-v1"
+local REQUIRED_PRODUCTION_KEY_ID = "prod-v1"
 
 DataEnvironment.Environments = {
 	Production = ENVIRONMENT_PRODUCTION,
@@ -64,6 +64,8 @@ local RESOLVABLE_PLACE_ROLES = {
 	PLACE_ROLE_MAIN,
 	PLACE_ROLE_AFK,
 }
+
+local hasLoggedResolution = false
 
 local function setAttribute(name, value)
 	local ok = pcall(function()
@@ -137,6 +139,22 @@ end
 
 local function getKeyFingerprint(value)
 	return fnvFingerprint(value)
+end
+
+local function logResolutionOnce(resolution)
+	if hasLoggedResolution then
+		return
+	end
+	hasLoggedResolution = true
+
+	print(string.format(
+		"[DataEnvironment] Resolved environment=%s placeRole=%s placeId=%s dataKey=%s keyId=%s",
+		tostring(resolution.Environment),
+		tostring(resolution.PlaceRole),
+		tostring(resolution.PlaceId),
+		tostring(resolution.DataKey),
+		tostring(resolution.KeyId)
+	))
 end
 
 local function findSecretsModule()
@@ -315,6 +333,7 @@ function DataEnvironment.ResolveDataKey()
 	recordDiagnostics(resolution, true, keyId, nil)
 	setAttribute("DataEnvironment_KeyFingerprint", resolution.KeyFingerprint)
 	setAttribute("DataEnvironment_KeyLength", resolution.KeyLength)
+	logResolutionOnce(resolution)
 	return resolution
 end
 

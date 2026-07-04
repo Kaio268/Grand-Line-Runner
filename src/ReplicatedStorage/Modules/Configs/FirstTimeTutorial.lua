@@ -8,7 +8,6 @@ local FirstTimeTutorial = {
 	TutorialCrewMember = {
 		Name = "Mask Dancer",
 		GrantedPath = "HiddenLeaderstats.TutorialCrewMemberGranted",
-		SpawnDistance = 10,
 		SpawnLifetime = 900,
 	},
 
