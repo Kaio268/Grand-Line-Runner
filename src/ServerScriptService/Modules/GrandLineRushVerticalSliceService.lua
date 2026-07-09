@@ -24,6 +24,7 @@ local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewM
 local CrewInventoryDerivedCache = require(ServerScriptService.Modules:WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
+local CrewStandIncomeAuthority = require(ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
 local GTRActionDiagnostics = require(ServerScriptService.Modules:WaitForChild("GTRActionDiagnostics"))
 local PaidRandomItemPolicy = require(ServerScriptService.Modules:WaitForChild("PaidRandomItemPolicy"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
@@ -1589,8 +1590,6 @@ local function canOpenPaidRandomChest(player, chestData, context)
 	return false, policyState
 end
 
-local ensureStarterCrew
-
 local function resolveCanonicalCrewGrantData(rewardData, options)
 	rewardData = if typeof(rewardData) == "table" then rewardData else {}
 	options = if typeof(options) == "table" then options else {}
@@ -1668,104 +1667,6 @@ local function resolveCanonicalCrewGrantData(rewardData, options)
 		Income = tonumber(info.Income) or 0,
 		CanonicalRarity = tostring(info.Rarity or "Common"),
 	}
-end
-
-local function countCanonicalCrewEntries(player)
-	local inventory = CrewInstanceService.GetCrewInventory(player)
-	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
-		return 0
-	end
-
-	local count = 0
-	for _, instanceData in pairs(inventory.ById) do
-		if typeof(instanceData) == "table" then
-			count += 1
-		end
-	end
-	return count
-end
-
-local function findCanonicalStarterCrewInstance(player)
-	local inventory = CrewInstanceService.GetCrewInventory(player)
-	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
-		return nil, nil
-	end
-
-	for _, rawInstanceId in ipairs(inventory.Order or {}) do
-		local instanceId = tostring(rawInstanceId)
-		local instanceData = inventory.ById[instanceId]
-		if typeof(instanceData) == "table"
-			and (
-				instanceData.GrandLineRushStarter == true
-				or tostring(instanceData.Source or "") == STARTER_CREW_SOURCE
-			)
-		then
-			return instanceId, instanceData
-		end
-	end
-
-	for instanceId, instanceData in pairs(inventory.ById) do
-		if typeof(instanceData) == "table"
-			and (
-				instanceData.GrandLineRushStarter == true
-				or tostring(instanceData.Source or "") == STARTER_CREW_SOURCE
-			)
-		then
-			return tostring(instanceId), instanceData
-		end
-	end
-
-	return nil, nil
-end
-
-local function stampCanonicalStarterMetadata(player, canonicalInstanceId, legacyEntry)
-	canonicalInstanceId = tostring(canonicalInstanceId or "")
-	if canonicalInstanceId == "" then
-		return nil, nil
-	end
-
-	local resolvedInstanceId, canonicalEntry, canonicalInventory = CrewInstanceService.GetInstance(player, canonicalInstanceId)
-	if typeof(canonicalEntry) ~= "table" or typeof(canonicalInventory) ~= "table" then
-		return nil, nil
-	end
-
-	legacyEntry = if typeof(legacyEntry) == "table" then legacyEntry else {}
-	local changed = false
-	if tostring(canonicalEntry.Source or "") ~= STARTER_CREW_SOURCE then
-		canonicalEntry.Source = STARTER_CREW_SOURCE
-		changed = true
-	end
-	if canonicalEntry.GrandLineRushStarter ~= true then
-		canonicalEntry.GrandLineRushStarter = true
-		changed = true
-	end
-	if canonicalEntry.TotalXP == nil and legacyEntry.TotalXP ~= nil then
-		canonicalEntry.TotalXP = math.max(0, math.floor(tonumber(legacyEntry.TotalXP) or 0))
-		changed = true
-	end
-	if tostring(canonicalEntry.DepthBand or "") == "" and tostring(legacyEntry.DepthBand or "") ~= "" then
-		canonicalEntry.DepthBand = tostring(legacyEntry.DepthBand)
-		changed = true
-	end
-
-	if changed then
-		local saveOk, saveReason = CrewInstanceService.SaveCrewInventory(player, canonicalInventory, {
-			SourcePath = "grand_line_rush_starter_metadata_stamp",
-		})
-		if saveOk ~= true then
-			warn(string.format(
-				"[GrandLineRush] Starter metadata stamp failed player=%s canonicalId=%s reason=%s",
-				player and player.Name or "unknown",
-				tostring(resolvedInstanceId),
-				tostring(saveReason or "unknown")
-			))
-		else
-			local updatedInstanceId, updatedEntry = CrewInstanceService.GetInstance(player, resolvedInstanceId)
-			return updatedInstanceId, updatedEntry
-		end
-	end
-
-	return resolvedInstanceId, canonicalEntry
 end
 
 local function buildGrantDataFromCanonical(instanceData)
@@ -1897,50 +1798,73 @@ local function tryAssignExtractedCrewToFirstEmptyQuickSlot(player, instanceId)
 	return false, assignResult
 end
 
-ensureStarterCrew = function(player)
+local function removeDeprecatedStarterCrew(player)
 	local profile = getProfileAndReplica(player)
 	if not profile then
 		return
 	end
 
-	local starterConfig = Economy.VerticalSlice.StarterCrew or {}
-	if starterConfig.Enabled ~= true then
+	local inventory = CrewInstanceService.GetCrewInventory(player)
+	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
 		return
 	end
 
-	local canonicalStarterId, canonicalStarterEntry = findCanonicalStarterCrewInstance(player)
-	if canonicalStarterId and canonicalStarterEntry then
-		stampCanonicalStarterMetadata(player, canonicalStarterId, canonicalStarterEntry)
-		TitleProgressService.RecordStarterCrew(player)
+	local removedById = {}
+	local removedCount = 0
+	local clearedStands = {}
+	for rawInstanceId, instanceData in pairs(inventory.ById) do
+		if typeof(instanceData) == "table" and tostring(instanceData.Source or "") == STARTER_CREW_SOURCE then
+			local instanceId = tostring(rawInstanceId)
+			removedById[instanceId] = true
+			removedCount += 1
+			inventory.ById[instanceId] = nil
+
+			CrewQuickSlotService.ClearAssignmentsForInstance(player, instanceId)
+
+			local assignedStand = tostring(instanceData.AssignedStand or "")
+			if assignedStand ~= "" then
+				CrewStandIncomeAuthority.ClearStandData(player, assignedStand, "deprecated_starter_crew_cleanup")
+				clearedStands[assignedStand] = true
+			end
+		end
+	end
+
+	if removedCount <= 0 then
 		return
 	end
 
-	if countCanonicalCrewEntries(player) > 0 then
-		TitleProgressService.RecordStarterCrew(player)
-		return
+	for index = #inventory.Order, 1, -1 do
+		if removedById[tostring(inventory.Order[index])] then
+			table.remove(inventory.Order, index)
+		end
 	end
 
-	local rewardData = {
-		Name = starterConfig.Name,
-		DisplayName = starterConfig.Name,
-		Rarity = starterConfig.Rarity or "Common",
-		Source = STARTER_CREW_SOURCE,
-		GrandLineRushStarter = true,
-	}
-	local canonicalInstanceId, canonicalEntry, grantData = grantCanonicalCrewMember(player, rewardData, STARTER_CREW_SOURCE, {
-		BypassCapacity = true,
-		GrandLineRushStarter = true,
+	for standName, standData in pairs(CrewStandIncomeAuthority.GetAllStandData(player)) do
+		if typeof(standData) == "table" then
+			local standInstanceId = tostring(standData.CrewMemberInstanceId or "")
+			if removedById[standInstanceId] and clearedStands[tostring(standName)] ~= true then
+				CrewStandIncomeAuthority.ClearStandData(player, standName, "deprecated_starter_crew_cleanup")
+			end
+		end
+	end
+
+	local saveOk, saveReason = CrewInstanceService.SaveCrewInventory(player, inventory, {
+		SourcePath = "deprecated_starter_crew_cleanup",
 	})
-	if canonicalInstanceId == nil or grantData == nil then
+	if saveOk ~= true then
 		warn(string.format(
-			"[GrandLineRush] Starter crew grant failed player=%s starter=%s",
+			"[GrandLineRush] Deprecated starter crew cleanup failed player=%s reason=%s",
 			player and player.Name or "unknown",
-			tostring(starterConfig.Name or "")
+			tostring(saveReason or "unknown")
 		))
 		return
 	end
-	stampCanonicalStarterMetadata(player, canonicalInstanceId, canonicalEntry)
-	TitleProgressService.RecordStarterCrew(player)
+
+	CrewInventoryDerivedCache.MarkDirty(player, "deprecated_starter_crew_cleanup")
+	getCrewMemberInventoryChangedRemote():FireClient(player, {
+		Reason = "deprecated_starter_crew_cleanup",
+		UpdatedAt = os.clock(),
+	})
 end
 
 local function addUnopenedChest(player, chestInfoOrTier, depthBand)
@@ -2199,7 +2123,7 @@ local function preparePlayerState(player)
 		return false, resolveActionResponse(player, false, nil, "profile_not_ready")
 	end
 
-	ensureStarterCrew(player)
+	removeDeprecatedStarterCrew(player)
 	return true
 end
 
@@ -3935,7 +3859,7 @@ end
 local function onPlayerAdded(player)
 	task.spawn(function()
 		if waitForDataReady(player, 15) then
-			ensureStarterCrew(player)
+			removeDeprecatedStarterCrew(player)
 			pushState(player)
 		end
 	end)

@@ -13,15 +13,13 @@ local TutorialConfigs = require(Modules:WaitForChild("Configs"):WaitForChild("Tu
 local GrandLineRushMetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
-local TutorialObjectiveIndicatorController = require(script.Parent:WaitForChild("TutorialObjectiveIndicatorController"))
+local TutorialGuideBeamController = require(script.Parent:WaitForChild("TutorialGuideBeamController"))
 
 local REQUEST_REMOTE_NAME = TutorialConfigs.Remotes.RequestName
 local STATE_REMOTE_NAME = TutorialConfigs.Remotes.StateName
 local QUEUED_START_THROTTLE_SECONDS = 0.75
 local CONTEXTUAL_OBJECTIVE_GUI_NAME = "ContextualTutorialObjectiveGui"
 local CONTEXTUAL_SCREEN_GUI_DISPLAY_ORDER = 180
-local CONTEXTUAL_OBJECTIVE_DISPLAY_ORDER = 177
-local CONTEXTUAL_OBJECTIVE_Z_INDEX = 184
 local OBJECTIVE_TARGET_REFRESH_SECONDS = 2.5
 
 local screenGui = Instance.new("ScreenGui")
@@ -33,10 +31,9 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
 local root = ReactRoblox.createRoot(screenGui)
-local objectiveController = TutorialObjectiveIndicatorController.new(playerGui, {
-	Name = CONTEXTUAL_OBJECTIVE_GUI_NAME,
-	DisplayOrder = CONTEXTUAL_OBJECTIVE_DISPLAY_ORDER,
-	ZIndex = CONTEXTUAL_OBJECTIVE_Z_INDEX,
+local guideBeamController = TutorialGuideBeamController.new(player, {
+	RequestKey = CONTEXTUAL_OBJECTIVE_GUI_NAME,
+	Priority = 60,
 })
 
 local destroyed = false
@@ -124,14 +121,14 @@ end
 
 local function renderContextualObjective(presentation)
 	if shouldShowObjectiveForState(presentation) then
-		objectiveController:SetTarget(tutorialState.target, {
-			PathOptions = presentation.ObjectivePathOptions,
+		guideBeamController:ShowGuide(tutorialState.target, {
+			TutorialId = tostring(tutorialState.tutorialId or ""),
 			ShowPath = presentation.ShowObjectivePath == true,
-			ZIndex = CONTEXTUAL_OBJECTIVE_Z_INDEX,
+			PathOptions = presentation.ObjectivePathOptions,
 		})
 		scheduleObjectiveTargetRefresh()
 	else
-		objectiveController:Clear()
+		guideBeamController:HideGuide("inactive")
 	end
 end
 
@@ -222,6 +219,7 @@ local function requestAdvanceForScreenGuiTutorial(tutorialId)
 		return false
 	end
 
+	guideBeamController:HideGuide("advance")
 	requestInFlight = true
 	local ok, response = pcall(function()
 		return requestRemote:InvokeServer("Advance")
@@ -328,7 +326,7 @@ scheduleRender = function()
 		if active then
 			if runActive == true then
 				hideContextualScreenGuis(nil)
-				objectiveController:Clear()
+				guideBeamController:HideGuide("run_active")
 				root:render(React.createElement(React.Fragment))
 				return
 			end
@@ -344,7 +342,7 @@ scheduleRender = function()
 					gui.Enabled = true
 					renderContextualObjective(presentation)
 				else
-					objectiveController:Clear()
+					guideBeamController:HideGuide("missing_gui")
 					warnScreenGuiIssue(
 						"missing_gui:" .. guiName,
 						string.format("[TutorialController] Missing contextual tutorial ScreenGui %s.", guiName)
@@ -356,7 +354,7 @@ scheduleRender = function()
 			end
 
 			hideContextualScreenGuis(nil)
-			objectiveController:Clear()
+			guideBeamController:HideGuide("unsupported_presentation")
 			warnScreenGuiIssue(
 				"unsupported_presentation:" .. tostring(tutorialState.tutorialId or ""),
 				string.format(
@@ -367,7 +365,7 @@ scheduleRender = function()
 			root:render(React.createElement(React.Fragment))
 		else
 			hideContextualScreenGuis(nil)
-			objectiveController:Clear()
+			guideBeamController:HideGuide("inactive")
 			root:render(React.createElement(React.Fragment))
 			task.defer(tryStartQueuedTutorial)
 		end
@@ -559,7 +557,7 @@ local function initializeContextualScreenGui(gui)
 					and tutorialState.active == true
 					and tostring(tutorialState.tutorialId or "") == tutorialId
 				then
-					objectiveController:Clear()
+					guideBeamController:HideGuide("screen_gui_disabled")
 				end
 			end)
 		end
@@ -603,7 +601,7 @@ table.insert(cleanupConnections, player:GetAttributeChangedSignal(modalAttribute
 end))
 
 table.insert(cleanupConnections, player.CharacterAdded:Connect(function()
-	objectiveController:Clear()
+	guideBeamController:HideGuide("character_added")
 	task.defer(requestState)
 end))
 
@@ -618,7 +616,7 @@ task.spawn(function()
 			runActive = nextRunActive
 			if runActive == true then
 				hideContextualScreenGuis(nil)
-				objectiveController:Clear()
+				guideBeamController:HideGuide("run_active")
 			end
 			scheduleRender()
 			if runActive ~= true then
@@ -654,7 +652,7 @@ end)
 script.Destroying:Connect(function()
 	destroyed = true
 	disconnectAll()
-	objectiveController:Destroy()
+	guideBeamController:Destroy()
 	root:unmount()
 	screenGui:Destroy()
 end)

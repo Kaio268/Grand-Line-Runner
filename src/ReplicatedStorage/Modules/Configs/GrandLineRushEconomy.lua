@@ -94,11 +94,6 @@ local Economy = {
 			Deep = "Deep",
 			Abyssal = "Abyssal",
 		},
-		StarterCrew = {
-			Enabled = true,
-			Name = "Deckhand Rookie",
-			Rarity = "Common",
-		},
 		Remotes = {
 			RequestName = "GrandLineRushSliceRequest",
 			StateEventName = "GrandLineRushSliceState",

@@ -45,6 +45,45 @@ local function getInstancePosition(instance)
 	return nil
 end
 
+local function getGuideBasePart(instance)
+	if typeof(instance) ~= "Instance" or instance.Parent == nil then
+		return nil
+	end
+
+	if instance:IsA("BasePart") then
+		return instance
+	end
+	if instance:IsA("Attachment") then
+		local parent = instance.Parent
+		return if parent and parent:IsA("BasePart") then parent else nil
+	end
+	if instance:IsA("Model") then
+		local primaryPart = instance.PrimaryPart
+		if primaryPart and primaryPart:IsA("BasePart") then
+			return primaryPart
+		end
+
+		for _, childName in ipairs({ "LevelUp", "HumanoidRootPart", "RootPart", "Handle" }) do
+			local part = instance:FindFirstChild(childName, true)
+			if part and part:IsA("BasePart") then
+				return part
+			end
+		end
+
+		return instance:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	return instance:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function getGuideBottomSurfaceOffset(part, clearance)
+	if typeof(part) ~= "Instance" or not part:IsA("BasePart") then
+		return Vector3.new(0, -0.35, 0)
+	end
+
+	return Vector3.new(0, -part.Size.Y * 0.5 + (tonumber(clearance) or 0.05), 0)
+end
+
 local function getRootPosition(player)
 	local character = player and player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -143,6 +182,8 @@ local function buildCrewFeedCandidate(player, rootPosition, candidates, slotKey,
 			position = position,
 			slotKey = tostring(slotKey or ""),
 			crewMemberInstanceId = instanceId,
+			guidePart = levelUpPart,
+			guideOffset = getGuideBottomSurfaceOffset(levelUpPart, 0.05),
 		},
 	}
 end
@@ -287,12 +328,15 @@ TutorialTargetResolvers.Resolvers = {
 		if not basePosition then
 			return nil
 		end
+		local guidePart = getGuideBasePart(marker)
 
 		return {
 			id = "ship_upgrade_panel",
 			kind = "ship_upgrade_panel",
 			label = "Ship Upgrade",
 			position = getShipFacingPositionAt(activeShip, basePosition),
+			guidePart = guidePart,
+			guideOffset = getGuideBottomSurfaceOffset(guidePart, 0.05),
 		}
 	end,
 }

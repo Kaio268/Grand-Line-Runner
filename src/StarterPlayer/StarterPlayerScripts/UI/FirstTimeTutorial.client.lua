@@ -9,12 +9,10 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local TutorialConfig = require(Modules:WaitForChild("Configs"):WaitForChild("FirstTimeTutorial"))
 local TutorialGuideBeamController = require(script.Parent:WaitForChild("TutorialGuideBeamController"))
-local TutorialObjectiveIndicatorController = require(script.Parent:WaitForChild("TutorialObjectiveIndicatorController"))
 
 local REQUEST_REMOTE_NAME = TutorialConfig.Remotes.RequestName
 local STATE_REMOTE_NAME = TutorialConfig.Remotes.StateName
 local TUTORIAL_GUI_NAME = "FirstTimeTutorialGui"
-local OBJECTIVE_GUI_NAME = "FirstTimeTutorialObjectiveGui"
 local TUTORIAL_GUI_TIMEOUT_SECONDS = 10
 local STARTUP_GATE_TIMEOUT_SECONDS = 18
 
@@ -29,12 +27,10 @@ if tutorialGui and not tutorialGui:IsA("ScreenGui") then
 	tutorialGui = nil
 end
 
-local objectiveController = TutorialObjectiveIndicatorController.new(playerGui, {
-	Name = OBJECTIVE_GUI_NAME,
-	DisplayOrder = 181,
-	ZIndex = 184,
+local guideBeamController = TutorialGuideBeamController.new(player, {
+	RequestKey = "first_time_tutorial",
+	Priority = 100,
 })
-local guideBeamController = TutorialGuideBeamController.new(player)
 
 local destroyed = false
 local renderQueued = false
@@ -262,7 +258,6 @@ local function cleanupCompletedTutorialUi()
 		end
 		tutorialGui.Enabled = false
 	end
-	objectiveController:Clear()
 	guideBeamController:Clear()
 end
 
@@ -449,10 +444,8 @@ local function renderObjectiveIndicator(state)
 	local hasTarget = active and typeof(state.target) == "table"
 
 	if hasTarget then
-		objectiveController:Clear()
 		guideBeamController:SetTarget(state.target)
 	else
-		objectiveController:Clear()
 		guideBeamController:Clear()
 	end
 end
@@ -713,6 +706,5 @@ script.Destroying:Connect(function()
 	disconnectAll()
 	disconnectButtonConnections()
 	cleanupCompletedTutorialUi()
-	objectiveController:Destroy()
 	guideBeamController:Destroy()
 end)
